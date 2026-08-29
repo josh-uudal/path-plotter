@@ -42,7 +42,7 @@ function defaults(name,kind){
 }
 var CAPS={butt:1,round:1,square:1}, JOINS={miter:1,round:1,bevel:1};
 var SHAPECLASS={'GeneralPath':1,'Path2D.Double':1,'Path2D.Float':1,'Polygon':1};
-// java.awt.Polygon is one closed run of straight int-coordinate edges — nothing else
+// java.awt.Polygon is one closed run of straight int-coordinate edges, nothing else
 function polygonal(l){
   if(!l||l.kind!=='path'||!l.pts||l.pts.length<3) return false;
   for(var i=0;i<l.pts.length;i++){
@@ -1713,7 +1713,7 @@ function genParts(split){
       imgs.forEach(function(im){ B+='    '+im.v+' = ImageIO.read(new File('+jstr(im.name)+'));\n'; });
       B+='} catch (IOException ex) {\n    ex.printStackTrace();\n}\n';
     } else {
-      P+='// images — keep these files beside the class\n';
+      P+='// images: keep these files beside the class\n';
       imgs.forEach(function(im){ P+='BufferedImage '+im.v+' = null;\n'; });
       P+='try {\n';
       imgs.forEach(function(im){ P+='    '+im.v+' = ImageIO.read(new File('+jstr(im.name)+'));\n'; });
@@ -1770,7 +1770,7 @@ function genParts(split){
       return;
     }
 
-    // Area group — members keep their own transforms, relative to the base
+    // Area group: members keep their own transforms, relative to the base
     P+='// '+drawable.map(function(x){ return x.name; }).join(' → ')+'\n';
     var bm=tfMatrix(base), baseInv=null;
     if(bm){ try{ baseInv=bm.inverse(); }catch(e){ baseInv=null; } }
@@ -1982,13 +1982,13 @@ var RAIL=[
   {id:'quad',type:'tool',icon:'quad',label:'Quadratic curve',key:'2'},
   {id:'cubic',type:'tool',icon:'cubic',label:'Cubic curve',key:'3'},
   {sep:true},
-  {id:'rect',type:'tool',icon:'rect',label:'Rectangle2D — drag out',key:'R'},
-  {id:'ellipse',type:'tool',icon:'ellipse',label:'Ellipse2D — drag out',key:'E'},
-  {id:'arc',type:'tool',icon:'arc',label:'Arc2D — drag out',key:'A'},
+  {id:'rect',type:'tool',icon:'rect',label:'Rectangle2D (drag out)',key:'R'},
+  {id:'ellipse',type:'tool',icon:'ellipse',label:'Ellipse2D (drag out)',key:'E'},
+  {id:'arc',type:'tool',icon:'arc',label:'Arc2D (drag out)',key:'A'},
   {id:'text',type:'tool',icon:'text',label:'drawString text',key:'T'},
   {sep:true},
   {id:'pan',type:'tool',icon:'pan',label:'Pan the canvas',key:'H'},
-  {id:'image',type:'tool',icon:'image',label:'Trace image — click to load one',key:'I'},
+  {id:'image',type:'tool',icon:'image',label:'Trace image (click to load one)',key:'I'},
   {id:'zin',type:'act',icon:'zin',label:'Zoom in',key:'+'},
   {id:'zout',type:'act',icon:'zout',label:'Zoom out',key:'-'},
   {id:'fit',type:'act',icon:'fit',label:'Fit to window',key:'0'},
@@ -2007,7 +2007,7 @@ var HINTS={
   line:'Click to add a straight segment',
   quad:'Click to add a curve, then drag its control square',
   cubic:'Click to add a curve, then drag its two control squares',
-  rect:'Drag out a rectangle — give it an arc width for RoundRectangle2D',
+  rect:'Drag out a rectangle; give it an arc width for RoundRectangle2D',
   ellipse:'Drag out an ellipse',
   arc:'Drag out an arc, then set start and extent angles',
   text:'Click where the text baseline should start',
@@ -2149,7 +2149,7 @@ function renderLayers(){
       var body=document.createElement('div'); body.className='lbody';
       var nm=document.createElement('input');
       nm.className='lname'; nm.value=lyr.name;
-      nm.title='Rename — this becomes the Java variable';
+      nm.title='Rename: this becomes the Java variable';
       nm.onpointerdown=function(e){ e.stopPropagation(); };
       nm.onclick=function(e){ e.stopPropagation(); };
       nm.onchange=function(){ push(); lyr.name=nm.value.trim()||'shape'; sync(); };
@@ -2297,8 +2297,8 @@ function syncProps(){
   document.getElementById('shapeClassNote').textContent = isPoly
     ? 'Polygon takes int arrays, always closes, and has no winding rule of its own.'
     : poly ? 'Every segment here is straight, so Polygon is available.'
-    : 'Polygon needs one unbroken run of straight segments — curves or extra subpaths rule it out.';
-  // the selected point gets real number fields — this tool is about exact coords
+    : 'Polygon needs one unbroken run of straight segments; curves or extra subpaths rule it out.';
+  // the selected point gets real number fields, since this tool is about exact coords
   var ptRow=document.getElementById('ptRow');
   if(l.kind==='path'&&S.sel&&l.pts[S.sel.i]){
     var p=l.pts[S.sel.i], k=S.sel.key;
@@ -2326,7 +2326,7 @@ function syncProps(){
   var roundArc=isCircularArc(l);
   document.getElementById('trot').disabled=roundArc;
   document.getElementById('tfNote').innerHTML = roundArc
-    ? 'This arc is circular, so rotating it only moves <code>start°</code> — the output stays a plain '
+    ? 'This arc is circular, so rotating it only moves <code>start°</code>, so the output stays a plain '
       +'<code>Arc2D.Double</code> with no transform. Drag the round handles on the sheet to reshape it.'
     : 'Applied about the shape&rsquo;s centre, then undone with <code>g2.setTransform</code>. '
       +'Selection handles follow the transform.';
@@ -2353,7 +2353,7 @@ function syncProps(){
   document.getElementById('dashPat').value=l.dash;
   document.getElementById('dashPhase').value=l.dashPhase;
   document.getElementById('strokeNote').textContent =
-    isStrokeDefault(l) ? 'Java defaults — emitted as new BasicStroke('+l.strokeW+'f).'
+    isStrokeDefault(l) ? 'Java defaults, emitted as new BasicStroke('+l.strokeW+'f).'
     : dashArray(l) ? 'Dash lengths are in shape units, like the float[] Java takes.'
     : 'Miter limit only bites on JOIN_MITER.';
   document.getElementById('alpha').value=Math.round(l.alpha*100);
@@ -2370,7 +2370,7 @@ function syncProps(){
     ts.style.backgroundImage=l.tex.src?'url("'+l.tex.src+'")':'';
     ts.classList.toggle('empty',!l.tex.src);
     document.getElementById('texNote').textContent =
-      l.tex.src ? ('Tile: '+(l.tex.name||'texture.png')) : 'No tile chosen — falls back to the fill colour.';
+      l.tex.src ? ('Tile: '+(l.tex.name||'texture.png')) : 'No tile chosen; falls back to the fill colour.';
     document.getElementById('texX').value=l.tex.x;
     document.getElementById('texY').value=l.tex.y;
     document.getElementById('texW').value=l.tex.w;
@@ -2503,7 +2503,7 @@ function doUngroup(){
 /* ================= pointer ================= */
 
 // if a pointerup was missed (released off-canvas, cancelled, alt-tabbed) the old
-// drag state would silently drag shapes on the next move — drop it instead
+// drag state would silently drag shapes on the next move, so drop it instead
 // capture keeps a drag alive off-canvas, but must never abort the handler
 function capture(e){
   try{ board.setPointerCapture(e.pointerId); }catch(err){}
@@ -2775,7 +2775,7 @@ function openTextEditor(idx){
     }
   });
   ta.addEventListener('blur',closeTextEditor);
-  setStatus('text','Typing on the sheet — Esc or click away when you are done',true);
+  setStatus('text','Typing on the sheet. Esc or click away when you are done',true);
 }
 function closeTextEditor(){
   if(!textEdit) return;
@@ -2872,12 +2872,12 @@ board.addEventListener('pointerup',function(e){
     var l=S.layers[S.newDrag.idx];
     if(norm(l.g).w<3||norm(l.g).h<3){
       l.g.w=Math.max(norm(l.g).w,120); l.g.h=Math.max(norm(l.g).h,90);
-      toast('Tiny drag — gave it a default size');
+      toast('Tiny drag, so it got a default size');
     }
     S.newDrag=null; sync();
   }
   if(S.drag){ S.drag=null; sync(); }
-  if(S.rotDrag){ S.rotDrag=null; document.getElementById('coords').textContent='—'; sync(); }
+  if(S.rotDrag){ S.rotDrag=null; document.getElementById('coords').textContent='·'; sync(); }
   S.moveDrag=null; S.panDrag=null; S.imgDrag=null;
   board.style.cursor = S.tool==='pan'?'grab' : S.tool==='image'?'move'
                      : S.tool==='select'?'default':'crosshair';
@@ -2886,7 +2886,7 @@ board.addEventListener('pointerup',function(e){
 
 board.addEventListener('pointerleave',function(){
   if(!S.drag&&!S.panDrag&&!S.imgDrag&&!S.newDrag&&!S.moveDrag&&S.hover){
-    S.hover=null; document.getElementById('coords').textContent='—'; draw();
+    S.hover=null; document.getElementById('coords').textContent='·'; draw();
   }
 });
 board.addEventListener('contextmenu',function(e){
@@ -3157,7 +3157,7 @@ function addImageLayer(src,name){
     l.g.x=Math.round((S.W-l.g.w)/2); l.g.y=Math.round((S.H-l.g.h)/2);
     S.layers.push(l); S.active=S.layers.length-1; S.selLayers=[S.active]; S.sel=null;
     sync(); showTab('shape'); setTool('select');
-    toast('Image layer added — drag the corners to size it');
+    toast('Image layer added. Drag the corners to size it');
   };
   img.onerror=function(){ toast('That image could not be decoded'); };
   img.src=src;
@@ -3238,7 +3238,7 @@ function loadImageSrc(src,keep){
     document.getElementById('opVal').textContent=Math.round(S.img.alpha*100)+'%';
     document.getElementById('ix').value=S.img.x;
     document.getElementById('iy').value=S.img.y;
-    if(!keep){ showTab('image'); setTool('image'); toast('Photo loaded — drag to position, scroll to resize'); }
+    if(!keep){ showTab('image'); setTool('image'); toast('Photo loaded. Drag to position, scroll to resize'); }
     sync();
   };
   img.onerror=function(){ toast('That image could not be decoded'); };
@@ -3379,7 +3379,7 @@ document.getElementById('exportPng').onclick=function(){
 document.getElementById('clearAll').onclick=function(){
   push();
   S.layers=[normalize(defaults('path 1','path'))]; S.active=0; S.selLayers=[0]; S.sel=null;
-  sync(); toast('Cleared — Ctrl+Z brings it back');
+  sync(); toast('Cleared. Ctrl+Z brings it back');
 };
 
 /* ================= drawer, copy, toast ================= */
@@ -3510,7 +3510,7 @@ document.getElementById('fineStep').addEventListener('input',function(){
 });
 function fineStatus(on){
   if(textEdit) return;
-  if(on) setStatus('fine','Fine placement — snapping off, '+S.fineStep+'px steps',true);
+  if(on) setStatus('fine','Fine placement: snapping off, '+S.fineStep+'px steps',true);
   else toolStatus();
 }
 
@@ -3542,7 +3542,7 @@ document.getElementById('sysFonts').onclick=function(){
       // permission dismissed, or the browser exposed nothing
       toast('No system fonts were shared');
       document.getElementById('fontNote').textContent=
-        'The browser returned no families — permission may have been dismissed. '
+        'The browser returned no families; permission may have been dismissed. '
         +'The four logical names always work.';
       return;
     }
@@ -3559,7 +3559,7 @@ document.getElementById('sysFonts').onclick=function(){
     sel.appendChild(og);
     document.getElementById('fontNote').textContent=
       fams.length+' installed families available. Java resolves these by name, so the machine running '
-      +'your class needs them too — the four logical names never fail.';
+      +'your class needs them too; the four logical names never fail.';
     syncProps();
     toast('Loaded '+fams.length+' system fonts');
   }).catch(function(err){
