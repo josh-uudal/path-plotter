@@ -96,7 +96,15 @@
           <button class="act" id="clearAll">Start over</button>
         </div>
         <input type="file" id="projFile" accept="application/json,.json" hidden>
-        <p class="note">Nothing is stored automatically. Save a .json to keep your work.</p>
+        <hr>
+        <h3>This browser</h3>
+        <div class="checks">
+          <label><input type="checkbox" id="remember" checked> Keep my work after I close the tab</label>
+        </div>
+        <div class="btns">
+          <button class="act" id="forgetSession">Clear stored work</button>
+        </div>
+        <p class="note">Your sheet is kept in this browser only, so a refresh or an accidental close will not lose it. It is not uploaded anywhere. Save a .json for a real backup or to move to another machine.</p>
       </div>
     </div>
   </nav>

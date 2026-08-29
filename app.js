@@ -2327,7 +2327,8 @@ function syncProps(){
     sw.classList.toggle('empty',!l.img.src);
     document.getElementById('imgLayerNote').textContent =
       l.img.src ? ('Emitted as ' + (l.img.name||'image.png'))
-                : 'No image chosen yet.';
+      : l.img.name ? ('"'+l.img.name+'" was too large to keep in this browser. Choose it again to draw it.')
+      : 'No image chosen yet.';
   }
   var sc=document.getElementById('shapeClass');
   sc.value=l.shapeClass||'GeneralPath';
@@ -2423,7 +2424,7 @@ function syncProps(){
   document.getElementById('isClip').disabled=(l.kind==='text'||l.kind==='image');
 }
 
-function sync(){ normSel(); renderLayers(); syncProps(); syncRail(); emitCode(); draw(); }
+function sync(){ normSel(); renderLayers(); syncProps(); syncRail(); emitCode(); draw(); scheduleSave(); }
 
 /* ================= editing ================= */
 
@@ -3396,6 +3397,65 @@ document.addEventListener('paste',function(e){
 
 /* ================= project ================= */
 
+/* ================= session memory =================
+   A refresh used to lose everything. The work is now mirrored into
+   localStorage as you go and on the way out, unless you turn it off. */
+
+var SKEY='pathPlotter/session@1', RKEY='pathPlotter/remember@1';
+var saveT=null, sessionTrimmed=false;
+
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+
+function projectData(withImages){
+  var layers=S.layers;
+  if(!withImages){
+    layers=JSON.parse(JSON.stringify(S.layers));
+    layers.forEach(function(l){
+      if(l.img) l.img.src='';
+      if(l.tex) l.tex.src='';
+    });
+  }
+  return {version:6,W:S.W,H:S.H,grid:S.grid,
+    gridLook:{color:S.gridColor,opacity:S.gridOpacity,width:S.gridWidth,
+              major:S.gridMajor,style:S.gridStyle},
+    className:document.getElementById('className').value,
+    layers:layers,active:S.active,
+    view:{z:S.view.z,x:S.view.x,y:S.view.y},
+    image:(withImages&&S.img)?{src:S.img.src,x:S.img.x,y:S.img.y,scale:S.img.scale,alpha:S.img.alpha}:null,
+    trimmed:!withImages};
+}
+function isBlankSheet(){
+  return S.layers.length===1&&S.layers[0].kind==='path'&&!(S.layers[0].pts||[]).length&&!S.img;
+}
+function saveSession(){
+  if(!S.remember) return;
+  if(isBlankSheet()){ lsDel(SKEY); return; }
+  if(lsSet(SKEY,JSON.stringify(projectData(true)))){ sessionTrimmed=false; return; }
+  // photos are base64 and can blow the ~5MB quota; keep the shapes at least
+  if(lsSet(SKEY,JSON.stringify(projectData(false)))&&!sessionTrimmed){
+    sessionTrimmed=true;
+    toast('Saved, but the images were too large to keep');
+  }
+}
+function scheduleSave(){
+  if(!S.remember) return;
+  clearTimeout(saveT);
+  saveT=setTimeout(saveSession,900);
+}
+function restoreSession(){
+  var raw=lsGet(SKEY);
+  if(!raw) return false;
+  try{
+    var d=JSON.parse(raw);
+    if(!d||!d.layers||!d.layers.length) return false;
+    applyProject(d,true);
+    toast(d.trimmed?'Restored your work (images were not kept)':'Restored your last session');
+    return true;
+  }catch(e){ lsDel(SKEY); return false; }
+}
+
 function download(name,blob){
   var a=document.createElement('a'), url=URL.createObjectURL(blob);
   a.href=url; a.download=name; document.body.appendChild(a); a.click();
@@ -3403,44 +3463,45 @@ function download(name,blob){
   setTimeout(function(){ URL.revokeObjectURL(url); },1000);
 }
 document.getElementById('saveProj').onclick=function(){
-  var data={version:6,W:S.W,H:S.H,grid:S.grid,
-    gridLook:{color:S.gridColor,opacity:S.gridOpacity,width:S.gridWidth,
-              major:S.gridMajor,style:S.gridStyle},
-    className:document.getElementById('className').value,
-    layers:S.layers,active:S.active,
-    image:S.img?{src:S.img.src,x:S.img.x,y:S.img.y,scale:S.img.scale,alpha:S.img.alpha}:null};
-  download('path-plotter.json',new Blob([JSON.stringify(data)],{type:'application/json'}));
+  download('path-plotter.json',
+    new Blob([JSON.stringify(projectData(true))],{type:'application/json'}));
   toast('Project saved');
 };
 document.getElementById('openProj').onclick=function(){ document.getElementById('projFile').click(); };
+// shared by "Open .json" and by restoring the last session after a refresh
+function applyProject(d,keepView){
+  if(!d||!d.layers||!d.layers.length) throw new Error('no shapes');
+  S.W=d.W||600; S.H=d.H||450; S.grid=d.grid||25;
+  var gl=d.gridLook||{};
+  S.gridColor=gl.color||GRID_DEFAULTS.gridColor;
+  S.gridOpacity=(typeof gl.opacity==='number')?gl.opacity:GRID_DEFAULTS.gridOpacity;
+  S.gridWidth=gl.width||GRID_DEFAULTS.gridWidth;
+  S.gridMajor=gl.major||GRID_DEFAULTS.gridMajor;
+  S.gridStyle=gl.style||GRID_DEFAULTS.gridStyle;
+  S.layers=d.layers.map(normalize);
+  S.active=Math.min(d.active||0,S.layers.length-1);
+  S.selLayers=[S.active];
+  S.layers.forEach(function(l){
+    if(l.kind==='image'&&l.img.src) getImg(l.img.src);
+    if(l.paint==='texture'&&l.tex.src) getImg(l.tex.src);
+  });
+  document.getElementById('w').value=S.W;
+  document.getElementById('h').value=S.H;
+  syncGridUI();
+  if(d.className) document.getElementById('className').value=d.className;
+  if(d.image&&d.image.src) loadImageSrc(d.image.src,d.image);
+  sync();
+  if(keepView&&d.view&&d.view.z){ S.view.z=d.view.z; S.view.x=d.view.x; S.view.y=d.view.y; showZoom(); draw(); }
+  else fitView();
+}
 document.getElementById('projFile').addEventListener('change',function(e){
   var f=e.target.files[0]; if(!f) return;
   var rd=new FileReader();
   rd.onload=function(){
     try{
-      var d=JSON.parse(rd.result);
-      if(!d.layers||!d.layers.length) throw new Error('no shapes');
       push();
-      S.W=d.W||600; S.H=d.H||450; S.grid=d.grid||25;
-      var gl=d.gridLook||{};
-      S.gridColor=gl.color||GRID_DEFAULTS.gridColor;
-      S.gridOpacity=(typeof gl.opacity==='number')?gl.opacity:GRID_DEFAULTS.gridOpacity;
-      S.gridWidth=gl.width||GRID_DEFAULTS.gridWidth;
-      S.gridMajor=gl.major||GRID_DEFAULTS.gridMajor;
-      S.gridStyle=gl.style||GRID_DEFAULTS.gridStyle;
-      S.layers=d.layers.map(normalize);
-      S.active=Math.min(d.active||0,S.layers.length-1);
-      S.selLayers=[S.active];
-      S.layers.forEach(function(l){
-        if(l.kind==='image'&&l.img.src) getImg(l.img.src);
-        if(l.paint==='texture'&&l.tex.src) getImg(l.tex.src);
-      });
-      document.getElementById('w').value=S.W;
-      document.getElementById('h').value=S.H;
-      syncGridUI();
-      if(d.className) document.getElementById('className').value=d.className;
-      if(d.image&&d.image.src) loadImageSrc(d.image.src,d.image);
-      sync(); fitView(); toast('Project opened');
+      applyProject(JSON.parse(rd.result),false);
+      toast('Project opened');
     }catch(err){ toast('That file is not a Path Plotter project'); }
   };
   rd.readAsText(f);
@@ -3722,6 +3783,24 @@ document.addEventListener('keydown',function(e){
   }
 });
 
+/* ================= session wiring ================= */
+
+document.getElementById('remember').onchange=function(){
+  S.remember=this.checked;
+  lsSet(RKEY,S.remember?'1':'0');
+  if(S.remember){ saveSession(); toast('Your work will be kept in this browser'); }
+  else { lsDel(SKEY); toast('Autosave off, and the stored copy was cleared'); }
+};
+document.getElementById('forgetSession').onclick=function(){
+  lsDel(SKEY); sessionTrimmed=false; toast('Stored work cleared');
+};
+// pagehide is the reliable one; visibilitychange covers phones and tab switches
+window.addEventListener('pagehide',saveSession);
+window.addEventListener('beforeunload',saveSession);
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='hidden') saveSession();
+});
+
 /* ================= boot ================= */
 
 if(window.ResizeObserver) new ResizeObserver(function(){ resize(); }).observe(stage);
@@ -3731,11 +3810,20 @@ hitCtx.setTransform(1,0,0,1,0,0);
 buildRail();
 initResizers();
 initMenus();
+S.remember=(lsGet(RKEY)!=='0');
+document.getElementById('remember').checked=S.remember;
+
 S.layers.push(normalize(defaults('path 1','path')));
 S.active=0; S.selLayers=[0];
 setTool('line');
 showTab('shape');
 sync();
-requestAnimationFrame(function(){ resize(); fitView(); });
+
+var restored=S.remember&&restoreSession();
+requestAnimationFrame(function(){
+  resize();
+  if(!restored) fitView();
+  else if(!S.view.z) fitView();
+});
 
 })();
