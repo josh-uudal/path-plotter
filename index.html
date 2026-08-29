@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Path Plotter — a Java2D shape editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header>
+  <h1>Path Plotter</h1>
+
+  <nav id="menubar" aria-label="Canvas options">
+    <div class="menu" data-menu="sheet">
+      <button type="button" aria-haspopup="true" aria-expanded="false">Sheet</button>
+      <div class="menupanel">
+        <h3>Sheet size</h3>
+        <div class="row">
+          <div class="field"><label for="w">Width</label><input id="w" type="number" value="600" min="50" max="3000" step="10"></div>
+          <div class="field"><label for="h">Height</label><input id="h" type="number" value="450" min="50" max="3000" step="10"></div>
+        </div>
+        <p class="note">Match these to your <code>JPanel</code> so coordinates transfer exactly.</p>
+        <hr>
+        <h3>Generated class</h3>
+        <div class="row">
+          <div class="field"><label for="className">Class name for “full class” output</label><input id="className" type="text" value="ShapePanel"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="menu" data-menu="grid">
+      <button type="button" aria-haspopup="true" aria-expanded="false">Grid</button>
+      <div class="menupanel">
+        <h3>Grid</h3>
+        <div class="row">
+          <div class="field"><label for="gs">Grid step (px)</label><input id="gs" type="number" value="25" min="1" max="200"></div>
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" id="gridChk" checked> Show grid <kbd>G</kbd></label>
+          <label><input type="checkbox" id="snapChk" checked> Snap <kbd>S</kbd></label>
+          <label><input type="checkbox" id="labelsChk" checked> Point labels</label>
+          <label><input type="checkbox" id="aaChk" checked> Antialiasing</label>
+        </div>
+        <hr>
+        <h3>Fine placement</h3>
+        <div class="row">
+          <div class="field"><label for="fineKey">Hold to bypass snap</label>
+            <select id="fineKey">
+              <option value="alt">Alt</option>
+              <option value="shift">Shift</option>
+              <option value="ctrl">Ctrl</option>
+            </select></div>
+          <div class="field" style="max-width:92px"><label for="fineStep">Step (px)</label><input id="fineStep" type="number" value="1" min="1" max="50"></div>
+        </div>
+        <p class="note">Hold the key while dragging to ignore the grid and land on exact steps. It also sets the arrow-key nudge.</p>
+      </div>
+    </div>
+
+    <div class="menu" data-menu="project">
+      <button type="button" aria-haspopup="true" aria-expanded="false">Project</button>
+      <div class="menupanel">
+        <h3>Project</h3>
+        <div class="btns">
+          <button class="act" id="saveProj">Save .json</button>
+          <button class="act" id="openProj">Open .json</button>
+          <button class="act" id="exportPng">Export PNG</button>
+          <button class="act" id="clearAll">Start over</button>
+        </div>
+        <input type="file" id="projFile" accept="application/json,.json" hidden>
+        <p class="note">Nothing is stored automatically. Save a .json to keep your work.</p>
+      </div>
+    </div>
+  </nav>
+
+  <span class="spacer"></span>
+  <span class="readout" id="coords">—</span>
+  <div class="zoomctl">
+    <button id="zoomOut" title="Zoom out">−</button>
+    <span id="zoomVal">100%</span>
+    <button id="zoomIn" title="Zoom in">+</button>
+    <button id="zoomFit" title="Fit to window (0)">fit</button>
+  </div>
+</header>
+
+<div id="shell">
+  <nav id="rail" aria-label="Tools"></nav>
+
+  <div id="centre">
+    <div id="stage">
+      <canvas id="board"></canvas>
+      <div id="statusbar"><span class="stag" id="hintTag">tool</span><span id="hint"></span></div>
+      <div id="dropzone">Drop the photo to trace it</div>
+    </div>
+    <div id="drawer">
+      <div class="bar" id="drawerBar">
+        <span class="chev"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
+        <h2>Java output</h2>
+        <div class="seg" style="width:186px" id="outMode">
+          <button data-o="frag" aria-pressed="true">fragment</button>
+          <button data-o="full" aria-pressed="false">full class</button>
+        </div>
+        <label class="onceBox" id="onceWrap" title="Build shapes and load images once instead of on every repaint">
+          <input type="checkbox" id="buildOnce" checked> build once
+        </label>
+        <span class="spacer"></span>
+        <button class="act primary" id="copy" style="padding:5px 12px">Copy code</button>
+      </div>
+      <pre id="code"></pre>
+    </div>
+  </div>
+
+  <aside id="side">
+    <div id="sideResize" title="Drag to resize the panel"></div>
+    <div id="tabs" role="tablist">
+      <button role="tab" data-p="shape"  aria-selected="true">Shape</button>
+      <button role="tab" data-p="style"  aria-selected="false">Style</button>
+      <button role="tab" data-p="image"  aria-selected="false">Image</button>
+    </div>
+
+    <div id="props">
+
+      <!-- ============ SHAPE ============ -->
+      <div class="pane on" data-pane="shape">
+        <div class="group">
+          <h2>Geometry <span class="kindtag" id="kindTag">GeneralPath</span></h2>
+
+          <div id="geoPath">
+            <div class="row">
+              <div class="field"><label for="shapeClass">Java shape class</label>
+                <select id="shapeClass">
+                  <option value="GeneralPath">GeneralPath</option>
+                  <option value="Path2D.Double">Path2D.Double</option>
+                  <option value="Path2D.Float">Path2D.Float</option>
+                  <option value="Polygon">Polygon (int arrays)</option>
+                </select></div>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="close" checked> closePath()</label>
+            </div>
+            <div class="row">
+              <div class="field"><label for="wind">Winding rule</label>
+                <select id="wind">
+                  <option value="nonzero">WIND_NON_ZERO</option>
+                  <option value="evenodd">WIND_EVEN_ODD</option>
+                </select></div>
+            </div>
+            <p class="note" id="shapeClassNote"></p>
+            <div id="ptRow" style="display:none">
+              <span class="selinfo" id="ptLabel"></span>
+              <div class="row">
+                <div class="field"><label for="ptx">point x</label><input id="ptx" type="number"></div>
+                <div class="field"><label for="pty">point y</label><input id="pty" type="number"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="geoRect" style="display:none">
+            <div class="row">
+              <div class="field"><label for="gx">x</label><input id="gx" type="number"></div>
+              <div class="field"><label for="gy">y</label><input id="gy" type="number"></div>
+            </div>
+            <div class="row">
+              <div class="field"><label for="gw">width</label><input id="gw" type="number" min="1"></div>
+              <div class="field"><label for="gh">height</label><input id="gh" type="number" min="1"></div>
+            </div>
+            <div class="row" id="cornerRow">
+              <div class="field"><label for="grx">arc width</label><input id="grx" type="number" min="0"></div>
+              <div class="field"><label for="gry">arc height</label><input id="gry" type="number" min="0"></div>
+            </div>
+            <p class="note" id="rectNote"></p>
+          </div>
+
+          <div id="geoArc" style="display:none">
+            <div class="row">
+              <div class="field"><label for="astart">start°</label><input id="astart" type="number" step="5"></div>
+              <div class="field"><label for="aext">extent°</label><input id="aext" type="number" step="5"></div>
+            </div>
+            <div class="row">
+              <div class="field"><label for="atype">Closure</label>
+                <select id="atype">
+                  <option value="OPEN">Arc2D.OPEN</option>
+                  <option value="CHORD">Arc2D.CHORD</option>
+                  <option value="PIE">Arc2D.PIE</option>
+                </select></div>
+            </div>
+            <p class="note">Angles run counter-clockwise on screen: 90° is straight up.</p>
+          </div>
+
+          <div id="geoText" style="display:none">
+            <div class="field"><label for="tstr">Text</label><textarea id="tstr" rows="2"></textarea></div>
+            <div class="row">
+              <div class="field"><label for="tx">x</label><input id="tx" type="number"></div>
+              <div class="field"><label for="ty">y (baseline)</label><input id="ty" type="number"></div>
+            </div>
+            <div class="row">
+              <div class="field"><label for="tfam">Font</label>
+                <select id="tfam">
+                  <optgroup label="Java logical" id="logicalFonts">
+                    <option>SansSerif</option><option>Serif</option>
+                    <option>Monospaced</option><option>Dialog</option>
+                  </optgroup>
+                </select></div>
+              <div class="field" style="max-width:72px"><label for="tsize">Size</label><input id="tsize" type="number" min="4" max="400"></div>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="tbold"> Bold</label>
+              <label><input type="checkbox" id="titalic"> Italic</label>
+            </div>
+            <div class="btns">
+              <button class="act" id="sysFonts">Use system fonts…</button>
+              <button class="act" id="editOnCanvas">Edit on canvas</button>
+            </div>
+            <p class="note" id="fontNote">The four logical names always resolve on any JVM. Loading system fonts asks the browser for permission and lets you pick installed families — those must also be installed wherever the Java runs.</p>
+          </div>
+
+          <div id="geoImage" style="display:none">
+            <div class="swatchrow">
+              <span class="swatch empty" id="imgLayerSwatch"></span>
+              <p class="note" id="imgLayerNote" style="margin:0"></p>
+            </div>
+            <div class="btns">
+              <button class="act" id="imgReplace">Replace image…</button>
+              <button class="act" id="imgNatural">Natural size</button>
+            </div>
+            <input type="file" id="imgLayerFile" accept="image/*" hidden>
+          </div>
+
+          <div class="btns" id="convertRow" style="display:none">
+            <button class="act" id="toPath">Convert to GeneralPath</button>
+            <button class="act" id="resetGeo">Reset size</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Transform</h2>
+          <div class="row">
+            <div class="field"><label for="trot">rotate°</label><input id="trot" type="number" step="5" value="0"></div>
+            <div class="field"><label for="tsx">scale x</label><input id="tsx" type="number" step="0.1" value="1"></div>
+            <div class="field"><label for="tsy">scale y</label><input id="tsy" type="number" step="0.1" value="1"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label for="tshx">shear x</label><input id="tshx" type="number" step="0.05" value="0"></div>
+            <div class="field"><label for="tshy">shear y</label><input id="tshy" type="number" step="0.05" value="0"></div>
+            <div class="field"><button class="act" id="tfReset" style="width:100%">Reset</button></div>
+          </div>
+          <p class="note" id="tfNote">Applied about the shape's centre, then undone with <code>g2.setTransform</code>. Selection handles follow the transform.</p>
+        </div>
+
+        <div class="group">
+          <h2>Combine &amp; clip</h2>
+          <div class="row">
+            <div class="field"><label for="combine">Area operation against the shape below</label>
+              <select id="combine">
+                <option value="none">none — draw separately</option>
+                <option value="add">add — union</option>
+                <option value="subtract">subtract — cut out</option>
+                <option value="intersect">intersect — overlap only</option>
+                <option value="exclusiveOr">exclusiveOr — all but overlap</option>
+              </select></div>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" id="isClip"> Use as clip region</label>
+          </div>
+          <p class="note" id="clipNote">A clip shape is not drawn itself. Everything above it is confined to it until another clip replaces it.</p>
+        </div>
+      </div>
+
+      <!-- ============ STYLE ============ -->
+      <div class="pane" data-pane="style">
+        <div class="group">
+          <h2>Rendering</h2>
+          <div class="seg" id="renderMode">
+            <button data-r="fill" aria-pressed="false">fill</button>
+            <button data-r="draw" aria-pressed="true">draw</button>
+            <button data-r="both" aria-pressed="false">both</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Paint</h2>
+          <div class="seg" id="paintMode">
+            <button data-pt="solid"   aria-pressed="true">solid</button>
+            <button data-pt="linear"  aria-pressed="false">grad</button>
+            <button data-pt="radial"  aria-pressed="false">radial</button>
+            <button data-pt="texture" aria-pressed="false">texture</button>
+          </div>
+          <div class="row" id="fillRow">
+            <div class="field"><label for="fillCol">Fill</label><input id="fillCol" type="color"></div>
+            <div class="field" id="fill2Field"><label for="fillCol2">to</label><input id="fillCol2" type="color"></div>
+            <div class="field" id="gradAngField" style="max-width:74px"><label for="gradAng">angle°</label><input id="gradAng" type="number" step="15"></div>
+          </div>
+          <div id="texFields" style="display:none">
+            <div class="swatchrow">
+              <span class="swatch empty" id="texSwatch"></span>
+              <p class="note" id="texNote" style="margin:0"></p>
+            </div>
+            <div class="btns">
+              <button class="act" id="texLoad">Choose tile…</button>
+              <button class="act" id="texFit">Anchor to shape</button>
+            </div>
+            <input type="file" id="texFile" accept="image/*" hidden>
+            <div class="row">
+              <div class="field"><label for="texX">anchor x</label><input id="texX" type="number"></div>
+              <div class="field"><label for="texY">anchor y</label><input id="texY" type="number"></div>
+              <div class="field"><label for="texW">w</label><input id="texW" type="number" min="1"></div>
+              <div class="field"><label for="texH">h</label><input id="texH" type="number" min="1"></div>
+            </div>
+          </div>
+          <div class="slider">
+            <div class="lab"><span>Opacity (AlphaComposite)</span><b id="alphaVal">100%</b></div>
+            <input type="range" id="alpha" min="0" max="100" value="100">
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Line — BasicStroke</h2>
+          <div class="row">
+            <div class="field"><label for="strokeCol">Colour</label><input id="strokeCol" type="color"></div>
+            <div class="field" style="max-width:78px"><label for="strokeW">Width</label><input id="strokeW" type="number" min="1" max="60"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label for="capMode">Cap</label>
+              <select id="capMode">
+                <option value="butt">CAP_BUTT</option>
+                <option value="round">CAP_ROUND</option>
+                <option value="square">CAP_SQUARE</option>
+              </select></div>
+            <div class="field"><label for="joinMode">Join</label>
+              <select id="joinMode">
+                <option value="miter">JOIN_MITER</option>
+                <option value="round">JOIN_ROUND</option>
+                <option value="bevel">JOIN_BEVEL</option>
+              </select></div>
+          </div>
+          <div class="row">
+            <div class="field"><label for="dashPat">Dash pattern</label><input id="dashPat" type="text" placeholder="8 4"></div>
+            <div class="field" style="max-width:76px"><label for="dashPhase">Phase</label><input id="dashPhase" type="number" step="1"></div>
+            <div class="field" style="max-width:76px"><label for="miterLim">Miter</label><input id="miterLim" type="number" min="1" step="1"></div>
+          </div>
+          <p class="note" id="strokeNote"></p>
+        </div>
+
+        <div class="group">
+          <h2>Arrange</h2>
+          <div class="btns">
+            <button class="act" id="flipH">Flip horizontal</button>
+            <button class="act" id="flipV">Flip vertical</button>
+            <button class="act" id="centreH">Centre across</button>
+            <button class="act" id="centreV">Centre down</button>
+          </div>
+          <p class="note">Flip and centre act on every selected shape at once.</p>
+        </div>
+
+        <div class="group">
+          <h2>Align &amp; distribute</h2>
+          <div class="btns three">
+            <button class="act" id="alignL" title="Align left edges">⇤ left</button>
+            <button class="act" id="alignC" title="Align horizontal centres">⇔ centre</button>
+            <button class="act" id="alignR" title="Align right edges">⇥ right</button>
+            <button class="act" id="alignT" title="Align top edges">⇡ top</button>
+            <button class="act" id="alignM" title="Align vertical middles">⇕ middle</button>
+            <button class="act" id="alignB" title="Align bottom edges">⇣ bottom</button>
+          </div>
+          <div class="btns">
+            <button class="act" id="distH" title="Even horizontal gaps between centres">Spread across</button>
+            <button class="act" id="distV" title="Even vertical gaps between centres">Spread down</button>
+          </div>
+          <p class="note" id="alignNote"></p>
+        </div>
+      </div>
+
+      <!-- ============ IMAGE ============ -->
+      <div class="pane" data-pane="image">
+        <div class="group">
+          <h2>Image layer — drawImage</h2>
+          <div class="btns">
+            <button class="act primary" id="addImgLayer">New image layer…</button>
+            <button class="act" id="traceToLayer">Trace photo → layer</button>
+          </div>
+          <input type="file" id="imgNewFile" accept="image/*" hidden>
+          <p class="note">An image layer emits <code>g2.drawImage(…)</code>. The generated code reads the file by name, so keep it beside your class.</p>
+        </div>
+
+        <div class="group">
+          <h2>Trace image</h2>
+          <div class="btns">
+            <button class="act primary" id="traceBtn">Load photo…</button>
+            <button class="act" id="removeImg" disabled>Remove</button>
+          </div>
+          <input type="file" id="trace" accept="image/*" hidden>
+          <p class="note" id="imgEmptyNote">You can also drag a photo onto the canvas, or paste one with <kbd>Ctrl</kbd>+<kbd>V</kbd>. The trace image is a guide only — it is never generated.</p>
+          <div id="imgControls" style="display:none">
+            <div class="slider">
+              <div class="lab"><span>Opacity</span><b id="opVal">35%</b></div>
+              <input type="range" id="opacity" min="0" max="100" value="35">
+            </div>
+            <div class="slider">
+              <div class="lab"><span>Scale</span><b id="scVal">100%</b></div>
+              <input type="range" id="imgScale" min="5" max="400" value="100">
+            </div>
+            <div class="row">
+              <div class="field"><label for="ix">x</label><input id="ix" type="number" step="5"></div>
+              <div class="field"><label for="iy">y</label><input id="iy" type="number" step="5"></div>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="imgTop"> Draw on top</label>
+              <label><input type="checkbox" id="imgLock"> Lock position</label>
+            </div>
+            <div class="btns">
+              <button class="act" id="fitImg">Fit to sheet</button>
+              <button class="act" id="resetImg">Reset</button>
+            </div>
+            <p class="note">Pick the image tool in the rail, then drag to move and scroll to resize.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="stackResize" title="Drag to resize the shape list"></div>
+
+    <div id="stackwrap">
+      <div id="stackhead">
+        <h2>Shapes</h2>
+        <div class="hbtns">
+          <button class="act" id="addLayer" title="New shape layer (N)">New</button>
+          <button class="act" id="dupLayer" title="Duplicate the selection (Ctrl+D)">Dupe</button>
+          <button class="act" id="groupLayer" title="Group the selection (Ctrl+G)">Group</button>
+          <button class="act" id="ungroupLayer" title="Ungroup (Ctrl+Shift+G)">Ungroup</button>
+          <button class="act" id="delLayer" title="Delete the selection">Del</button>
+        </div>
+      </div>
+      <div id="stack"><div id="dropline"></div></div>
+    </div>
+  </aside>
+</div>
+
+<div id="ctxmenu" role="menu"></div>
+
+<div id="toast"></div>
+
+<div id="help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div id="helpBox">
+    <button class="act" id="helpClose">Close</button>
+    <h3>Tools</h3>
+    <table>
+      <tr><td><kbd>V</kbd></td><td>Select — drag points, corners, or a whole shape</td></tr>
+      <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Line, quadratic, cubic path segment</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Rectangle — set an arc width for RoundRectangle2D</td></tr>
+      <tr><td><kbd>E</kbd></td><td>Ellipse</td></tr>
+      <tr><td><kbd>A</kbd></td><td>Arc</td></tr>
+      <tr><td><kbd>T</kbd></td><td>Text</td></tr>
+      <tr><td><kbd>H</kbd></td><td>Pan the canvas</td></tr>
+      <tr><td><kbd>I</kbd></td><td>Move and resize the trace image</td></tr>
+    </table>
+    <h3>Editing</h3>
+    <table>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>⇧Z</kbd></td><td>Undo / redo</td></tr>
+      <tr><td><kbd>U</kbd></td><td>Remove the last path point</td></tr>
+      <tr><td><kbd>Delete</kbd></td><td>Remove the selected point, or the selected shapes</td></tr>
+      <tr><td>Double-click</td><td>Insert a point on a segment (Select tool)</td></tr>
+      <tr><td>Arrows</td><td>Nudge 1px, with <kbd>Shift</kbd> 10px</td></tr>
+      <tr><td><kbd>Alt</kbd>-drag</td><td>Fine placement — ignores the grid; set the key and step under Grid</td></tr>
+      <tr><td>Double-click text</td><td>Type straight onto the sheet</td></tr>
+      <tr><td>Right-click</td><td>Rotate, flip, group and delete the selection</td></tr>
+      <tr><td>Rotate handle</td><td>The round grip above the selection; <kbd>Snap</kbd> steps it by 15°</td></tr>
+      <tr><td>Arc grips</td><td>Drag the two round handles to set start° and extent°</td></tr>
+      <tr><td><kbd>M</kbd></td><td>Start a new subpath</td></tr>
+      <tr><td><kbd>N</kbd></td><td>New shape layer</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Previous / next shape</td></tr>
+    </table>
+    <h3>Selecting &amp; grouping</h3>
+    <table>
+      <tr><td><kbd>Ctrl</kbd>+click</td><td>Add or remove a shape from the selection</td></tr>
+      <tr><td><kbd>Shift</kbd>+click</td><td>Select a run of shapes in the list</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Select every shape</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd></td><td>Copy, cut and paste shapes — also between browser tabs</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Duplicate the selection in place</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>⇧G</kbd></td><td>Group / ungroup the selection</td></tr>
+      <tr><td>drag a row</td><td>Reorder the shape list</td></tr>
+    </table>
+    <h3>View</h3>
+    <table>
+      <tr><td><kbd>Ctrl</kbd>+scroll</td><td>Zoom at the cursor</td></tr>
+      <tr><td>scroll</td><td>Pan, <kbd>Shift</kbd>+scroll horizontally</td></tr>
+      <tr><td>middle-drag</td><td>Pan from any tool</td></tr>
+      <tr><td><kbd>0</kbd></td><td>Fit to window</td></tr>
+      <tr><td><kbd>G</kbd> <kbd>S</kbd></td><td>Grid, snap</td></tr>
+      <tr><td><kbd>?</kbd></td><td>This panel</td></tr>
+    </table>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
