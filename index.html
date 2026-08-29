@@ -46,6 +46,31 @@
           <label><input type="checkbox" id="aaChk" checked> Antialiasing</label>
         </div>
         <hr>
+        <h3>Grid look</h3>
+        <div class="row">
+          <div class="field"><label for="gridCol">Colour</label><input id="gridCol" type="color" value="#c3cdc1"></div>
+          <div class="field" style="max-width:104px"><label for="gridW">Thickness</label><input id="gridW" type="number" min="0.5" max="4" step="0.5" value="1"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="gridStyle">Style</label>
+            <select id="gridStyle">
+              <option value="lines">Lines</option>
+              <option value="dots">Dots</option>
+              <option value="cross">Crosses</option>
+            </select></div>
+          <div class="field" style="max-width:104px"><label for="gridMajor">Bold every</label><input id="gridMajor" type="number" min="2" max="20" step="1" value="4"></div>
+        </div>
+        <div class="slider">
+          <div class="lab"><span>Grid opacity</span><b id="gridOpVal">100%</b></div>
+          <input type="range" id="gridOp" min="10" max="100" value="100">
+        </div>
+        <div class="btns">
+          <button class="act" id="gridReset">Reset look</button>
+          <button class="act" id="gridDark">High contrast</button>
+        </div>
+        <p class="note">Darken or thicken the grid when it washes out against a trace photo. Dots and crosses stay out of the way of the drawing.</p>
+
+        <hr>
         <h3>Fine placement</h3>
         <div class="row">
           <div class="field"><label for="fineKey">Hold to bypass snap</label>

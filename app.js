@@ -13,6 +13,7 @@ var hitCv=document.createElement('canvas'), hitCtx=hitCv.getContext('2d');
 
 var S={
   W:600,H:450,grid:25,snap:true,showGrid:true,labels:true,aa:true,
+  gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines',
   tool:'line', out:'frag',
   view:{z:1,x:0,y:0},
   layers:[],active:0,selLayers:[0],
@@ -1225,20 +1226,58 @@ function drawImg(){
   ctx.restore();
 }
 
+var GRID_DEFAULTS={gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines'};
+var MINOR_FADE=0.35;   // keeps the default look close to the old fixed palette
+
 function drawGrid(){
-  var g=S.grid,major=g*4,z=S.view.z;
+  var g=S.grid, z=S.view.z;
   if(g*z<4) return;
-  var minor=g*z>=9;
-  ctx.lineWidth=1/z;
-  for(var x=0;x<=S.W;x+=g){
-    var maj=(x%major===0); if(!maj&&!minor) continue;
-    ctx.strokeStyle=maj?'#c3cdc1':'#e7ebe4';
+  var N=Math.max(2,Math.round(S.gridMajor)||4);
+  var showMinor=g*z>=9;
+  var majA=S.gridOpacity, minA=S.gridOpacity*MINOR_FADE;
+  function isMaj(v){ return Math.round(v/g)%N===0; }
+  if(S.gridStyle==='dots'||S.gridStyle==='cross'){ drawGridMarks(g,N,showMinor,majA,minA,isMaj); return; }
+  ctx.lineWidth=S.gridWidth/z;
+  var x,y;
+  for(x=0;x<=S.W;x+=g){
+    var maj=isMaj(x); if(!maj&&!showMinor) continue;
+    ctx.strokeStyle=rgba(S.gridColor,maj?majA:minA);
     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,S.H); ctx.stroke();
   }
-  for(var y=0;y<=S.H;y+=g){
-    var mj=(y%major===0); if(!mj&&!minor) continue;
-    ctx.strokeStyle=mj?'#c3cdc1':'#e7ebe4';
+  for(y=0;y<=S.H;y+=g){
+    var mj=isMaj(y); if(!mj&&!showMinor) continue;
+    ctx.strokeStyle=rgba(S.gridColor,mj?majA:minA);
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(S.W,y); ctx.stroke();
+  }
+}
+
+// dots and crosses mark the intersections without laying lines over the artwork
+function drawGridMarks(g,N,showMinor,majA,minA,isMaj){
+  var z=S.view.z;
+  var cells=(S.W/g+1)*(S.H/g+1);
+  if(cells>40000){ showMinor=false; if(cells/(N*N)>40000) return; }
+  var r=Math.max(0.6,S.gridWidth)/z;
+  var arm=r*2.2;
+  ctx.lineWidth=Math.max(0.6,S.gridWidth)/z;
+  ctx.lineCap='butt';
+  for(var x=0;x<=S.W;x+=g){
+    var mx=isMaj(x);
+    for(var y=0;y<=S.H;y+=g){
+      var maj=mx&&isMaj(y);
+      if(!maj&&!showMinor) continue;
+      var col=rgba(S.gridColor,maj?majA:minA);
+      if(S.gridStyle==='dots'){
+        ctx.fillStyle=col;
+        ctx.beginPath(); ctx.arc(x,y,maj?r*1.7:r,0,Math.PI*2); ctx.fill();
+      } else {
+        var a=maj?arm*1.6:arm;
+        ctx.strokeStyle=col;
+        ctx.beginPath();
+        ctx.moveTo(x-a,y); ctx.lineTo(x+a,y);
+        ctx.moveTo(x,y-a); ctx.lineTo(x,y+a);
+        ctx.stroke();
+      }
+    }
   }
 }
 
@@ -3121,6 +3160,38 @@ document.getElementById('ungroupLayer').onclick=doUngroup;
 document.getElementById('gs').addEventListener('input',function(){
   var v=parseInt(this.value,10); if(!isNaN(v)&&v>0){ S.grid=v; draw(); }
 });
+function syncGridUI(){
+  document.getElementById('gridCol').value=S.gridColor;
+  document.getElementById('gridW').value=S.gridWidth;
+  document.getElementById('gridMajor').value=S.gridMajor;
+  document.getElementById('gridStyle').value=S.gridStyle;
+  document.getElementById('gridOp').value=Math.round(S.gridOpacity*100);
+  document.getElementById('gridOpVal').textContent=Math.round(S.gridOpacity*100)+'%';
+  document.getElementById('gs').value=S.grid;
+}
+document.getElementById('gridCol').oninput=function(){ S.gridColor=this.value; draw(); };
+document.getElementById('gridW').addEventListener('input',function(){
+  var v=parseFloat(this.value);
+  if(!isNaN(v)&&v>0){ S.gridWidth=Math.min(4,Math.max(0.5,v)); draw(); }
+});
+document.getElementById('gridMajor').addEventListener('input',function(){
+  var v=parseInt(this.value,10);
+  if(!isNaN(v)&&v>=2){ S.gridMajor=Math.min(20,v); draw(); }
+});
+document.getElementById('gridStyle').onchange=function(){ S.gridStyle=this.value; draw(); };
+document.getElementById('gridOp').addEventListener('input',function(){
+  S.gridOpacity=this.value/100;
+  document.getElementById('gridOpVal').textContent=this.value+'%';
+  draw();
+});
+document.getElementById('gridReset').onclick=function(){
+  Object.keys(GRID_DEFAULTS).forEach(function(k){ S[k]=GRID_DEFAULTS[k]; });
+  syncGridUI(); draw(); toast('Grid look reset');
+};
+document.getElementById('gridDark').onclick=function(){
+  S.gridColor='#5c6b73'; S.gridOpacity=0.85; S.gridWidth=1;
+  syncGridUI(); draw(); toast('High contrast grid');
+};
 document.getElementById('gridChk').onchange=function(){ S.showGrid=this.checked; syncRail(); draw(); };
 document.getElementById('snapChk').onchange=function(){ S.snap=this.checked; syncRail(); };
 document.getElementById('labelsChk').onchange=function(){ S.labels=this.checked; draw(); };
@@ -3333,6 +3404,8 @@ function download(name,blob){
 }
 document.getElementById('saveProj').onclick=function(){
   var data={version:6,W:S.W,H:S.H,grid:S.grid,
+    gridLook:{color:S.gridColor,opacity:S.gridOpacity,width:S.gridWidth,
+              major:S.gridMajor,style:S.gridStyle},
     className:document.getElementById('className').value,
     layers:S.layers,active:S.active,
     image:S.img?{src:S.img.src,x:S.img.x,y:S.img.y,scale:S.img.scale,alpha:S.img.alpha}:null};
@@ -3349,6 +3422,12 @@ document.getElementById('projFile').addEventListener('change',function(e){
       if(!d.layers||!d.layers.length) throw new Error('no shapes');
       push();
       S.W=d.W||600; S.H=d.H||450; S.grid=d.grid||25;
+      var gl=d.gridLook||{};
+      S.gridColor=gl.color||GRID_DEFAULTS.gridColor;
+      S.gridOpacity=(typeof gl.opacity==='number')?gl.opacity:GRID_DEFAULTS.gridOpacity;
+      S.gridWidth=gl.width||GRID_DEFAULTS.gridWidth;
+      S.gridMajor=gl.major||GRID_DEFAULTS.gridMajor;
+      S.gridStyle=gl.style||GRID_DEFAULTS.gridStyle;
       S.layers=d.layers.map(normalize);
       S.active=Math.min(d.active||0,S.layers.length-1);
       S.selLayers=[S.active];
@@ -3358,7 +3437,7 @@ document.getElementById('projFile').addEventListener('change',function(e){
       });
       document.getElementById('w').value=S.W;
       document.getElementById('h').value=S.H;
-      document.getElementById('gs').value=S.grid;
+      syncGridUI();
       if(d.className) document.getElementById('className').value=d.className;
       if(d.image&&d.image.src) loadImageSrc(d.image.src,d.image);
       sync(); fitView(); toast('Project opened');
