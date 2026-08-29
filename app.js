@@ -1046,8 +1046,13 @@ function zoomAt(sx,sy,next){
   showZoom(); draw();
 }
 function zoomCentre(n){ var r=board.getBoundingClientRect(); zoomAt(r.width/2,r.height/2,n); }
+var needFit=false;
 function fitView(){
   var vw=VW-GUT-24,vh=VH-GUT-24;
+  // a hidden tab or an unlaid-out pane leaves VW/VH at 0; fitting then bakes a
+  // junk view (z pinned to the floor, the sheet thousands of units off-screen)
+  if(vw<40||vh<40){ needFit=true; return; }
+  needFit=false;
   var z=Math.min(4,Math.max(.1,Math.min(vw/S.W,vh/S.H)));
   S.view.z=z; S.view.x=(vw-S.W*z)/2+12; S.view.y=(vh-S.H*z)/2+12;
   showZoom(); draw();
@@ -1059,7 +1064,7 @@ function resize(){
   var dpr=window.devicePixelRatio||1;
   board.width=Math.round(VW*dpr); board.height=Math.round(VH*dpr);
   board.style.width=VW+'px'; board.style.height=VH+'px';
-  draw();
+  if(needFit) fitView(); else draw();   // retry a fit that had nothing to measure
 }
 
 /* ================= painting ================= */
@@ -3422,7 +3427,6 @@ function projectData(withImages){
               major:S.gridMajor,style:S.gridStyle},
     className:document.getElementById('className').value,
     layers:layers,active:S.active,
-    view:{z:S.view.z,x:S.view.x,y:S.view.y},
     image:(withImages&&S.img)?{src:S.img.src,x:S.img.x,y:S.img.y,scale:S.img.scale,alpha:S.img.alpha}:null,
     trimmed:!withImages};
 }
@@ -3450,7 +3454,7 @@ function restoreSession(){
   try{
     var d=JSON.parse(raw);
     if(!d||!d.layers||!d.layers.length) return false;
-    applyProject(d,true);
+    applyProject(d);
     toast(d.trimmed?'Restored your work (images were not kept)':'Restored your last session');
     return true;
   }catch(e){ lsDel(SKEY); return false; }
@@ -3469,7 +3473,7 @@ document.getElementById('saveProj').onclick=function(){
 };
 document.getElementById('openProj').onclick=function(){ document.getElementById('projFile').click(); };
 // shared by "Open .json" and by restoring the last session after a refresh
-function applyProject(d,keepView){
+function applyProject(d){
   if(!d||!d.layers||!d.layers.length) throw new Error('no shapes');
   S.W=d.W||600; S.H=d.H||450; S.grid=d.grid||25;
   var gl=d.gridLook||{};
@@ -3491,8 +3495,8 @@ function applyProject(d,keepView){
   if(d.className) document.getElementById('className').value=d.className;
   if(d.image&&d.image.src) loadImageSrc(d.image.src,d.image);
   sync();
-  if(keepView&&d.view&&d.view.z){ S.view.z=d.view.z; S.view.x=d.view.x; S.view.y=d.view.y; showZoom(); draw(); }
-  else fitView();
+  // always fit: a stored pan/zoom is worth little and can strand the sheet off-screen
+  fitView();
 }
 document.getElementById('projFile').addEventListener('change',function(e){
   var f=e.target.files[0]; if(!f) return;
@@ -3500,7 +3504,7 @@ document.getElementById('projFile').addEventListener('change',function(e){
   rd.onload=function(){
     try{
       push();
-      applyProject(JSON.parse(rd.result),false);
+      applyProject(JSON.parse(rd.result));
       toast('Project opened');
     }catch(err){ toast('That file is not a Path Plotter project'); }
   };
@@ -3819,11 +3823,7 @@ setTool('line');
 showTab('shape');
 sync();
 
-var restored=S.remember&&restoreSession();
-requestAnimationFrame(function(){
-  resize();
-  if(!restored) fitView();
-  else if(!S.view.z) fitView();
-});
+if(S.remember) restoreSession();
+requestAnimationFrame(function(){ resize(); fitView(); });
 
 })();
