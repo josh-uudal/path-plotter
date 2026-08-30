@@ -93,6 +93,7 @@
           <button class="act" id="saveProj">Save .json</button>
           <button class="act" id="openProj">Open .json</button>
           <button class="act" id="exportPng">Export PNG</button>
+          <button class="act" id="openPreview">Preview window…</button>
           <button class="act" id="clearAll">Start over</button>
         </div>
         <input type="file" id="projFile" accept="application/json,.json" hidden>
@@ -378,6 +379,29 @@
         </div>
 
         <div class="group">
+          <h2>Scale selection</h2>
+          <div class="seg" id="scaleMode">
+            <button data-sm="geom" aria-pressed="true">geometry</button>
+            <button data-sm="tf" aria-pressed="false">transform</button>
+          </div>
+          <div class="row">
+            <div class="field"><label for="scFx">&times; x</label><input id="scFx" type="number" step="0.1" min="0.02" value="1"></div>
+            <div class="field"><label for="scFy">&times; y</label><input id="scFy" type="number" step="0.1" min="0.02" value="1"></div>
+            <div class="field"><button class="act primary" id="scApply" style="width:100%">Apply</button></div>
+          </div>
+          <div class="btns three">
+            <button class="act" id="scHalf" title="Halve the selection">50%</button>
+            <button class="act" id="scUp" title="Grow the selection by a quarter">125%</button>
+            <button class="act" id="scDouble" title="Double the selection">200%</button>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" id="scLock" checked> Lock aspect</label>
+            <label><input type="checkbox" id="scEach"> Scale each in place</label>
+          </div>
+          <p class="note" id="scaleNote"></p>
+        </div>
+
+        <div class="group">
           <h2>Arrange</h2>
           <div class="btns">
             <button class="act" id="flipH">Flip horizontal</button>
@@ -475,6 +499,34 @@
 
 <div id="toast"></div>
 
+<div id="preview" role="dialog" aria-label="Window preview">
+  <div id="pvHead">
+    <span class="stag">PREVIEW</span>
+    <span id="pvHeadName">Java window</span>
+    <span class="spacer"></span>
+    <button class="act" id="pvClose">Close</button>
+  </div>
+
+  <div id="pvBody">
+  <!-- mock Swing chrome: the frame is what pack() builds around the panel -->
+  <div id="pvWin">
+    <div id="pvBar">
+      <span id="pvTitle">ShapePanel</span>
+      <span id="pvChrome" aria-hidden="true"><i class="min"></i><i class="max"></i><i class="cls"></i></span>
+    </div>
+    <canvas id="pvCanvas"></canvas>
+  </div>
+
+  <div id="pvInfo">
+    <div class="pvRow"><span>Canvas <code>JPanel</code></span><b id="pvPanel">600 &times; 450</b></div>
+    <div class="pvRow"><span>Window <code>JFrame</code></span><b id="pvFrame">616 &times; 489</b></div>
+    <div class="pvRow"><span>Shown at</span><b id="pvZoom">100%</b></div>
+    <p class="note" id="pvWarn"></p>
+    <p class="note" id="pvNote"></p>
+  </div>
+  </div>
+</div>
+
 <div id="help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
   <div id="helpBox">
     <button class="act" id="helpClose">Close</button>
@@ -522,6 +574,7 @@
       <tr><td>middle-drag</td><td>Pan from any tool</td></tr>
       <tr><td><kbd>0</kbd></td><td>Fit to window</td></tr>
       <tr><td><kbd>G</kbd> <kbd>S</kbd></td><td>Grid, snap</td></tr>
+      <tr><td><kbd>P</kbd></td><td>Preview the Java window at 1:1, with its real dimensions</td></tr>
       <tr><td><kbd>?</kbd></td><td>This panel</td></tr>
     </table>
   </div>

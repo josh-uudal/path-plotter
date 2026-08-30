@@ -19,6 +19,7 @@ var S={
   layers:[],active:0,selLayers:[0],
   sel:null,drag:null,hover:null,nextIsMove:false,
   panDrag:null,imgDrag:null,newDrag:null,moveDrag:null,rotDrag:null,marquee:null,
+  scaleDrag:null,scaleMode:'geom',scaleEach:false,scaleLock:true,
   fine:false,constrain:false,fineStep:1,fineKey:'alt',rotEach:false,
   img:null,imgTop:false,imgLock:false
 };
@@ -953,6 +954,213 @@ function applyRotation(d,each){
   });
   sync();
 }
+/* ---- scale the whole selection ----
+   Two ways to grow a shape, and the emitted Java tells them apart: geometry
+   mode rewrites the coordinates so the output stays a bare shape, transform
+   mode leaves them alone and rides tf, which comes out as g2.scale(). Either
+   one can be driven by the corner grips or by typing a multiplier. */
+
+// grips sit just outside the selection box so they never land on the active
+// shape's own geometry handles
+var SCALE_OUT=13, SCALE_GRIP=9;
+function scaleHandles(){
+  if(S.tool!=='select') return null;
+  var b=selScreenBox(); if(!b) return null;
+  if(b.x1-b.x0<0.5&&b.y1-b.y0<0.5) return null;
+  var d=SCALE_OUT/S.view.z;
+  // cx,cy is the box corner a grip stands for; px,py the corner it pivots on
+  return {box:b,grips:[
+    {key:'nw',x:b.x0-d,y:b.y0-d,cx:b.x0,cy:b.y0,px:b.x1,py:b.y1,ox:-d,oy:-d},
+    {key:'ne',x:b.x1+d,y:b.y0-d,cx:b.x1,cy:b.y0,px:b.x0,py:b.y1,ox: d,oy:-d},
+    {key:'se',x:b.x1+d,y:b.y1+d,cx:b.x1,cy:b.y1,px:b.x0,py:b.y0,ox: d,oy: d},
+    {key:'sw',x:b.x0-d,y:b.y1+d,cx:b.x0,cy:b.y1,px:b.x1,py:b.y0,ox:-d,oy: d}]};
+}
+function hitScale(x,y){
+  var sh=scaleHandles(); if(!sh) return null;
+  var best=null, bd=SCALE_GRIP/S.view.z;
+  sh.grips.forEach(function(g){
+    var d=Math.hypot(g.x-x,g.y-y);
+    if(d<bd){ bd=d; best=g; }
+  });
+  return best;
+}
+// flipping is its own command, so a factor never goes negative here
+function scaleFactor(f){
+  f=parseFloat(f);
+  if(!isFinite(f)||f<=0) return 1;
+  return Math.min(50,Math.max(0.02,f));
+}
+// only the numbers a scale touches, so a live drag can rewind and reapply
+// from the same starting point instead of compounding rounding every move
+function scaleBase(l){
+  return {
+    pts:(l.pts||[]).map(function(p){
+      return {x:p.x,y:p.y,cx:p.cx,cy:p.cy,
+              c1x:p.c1x,c1y:p.c1y,c2x:p.c2x,c2y:p.c2y};
+    }),
+    g:{x:l.g.x,y:l.g.y,w:l.g.w,h:l.g.h,rx:l.g.rx,ry:l.g.ry},
+    text:{x:l.text.x,y:l.text.y,size:l.text.size},
+    tf:{sx:l.tf.sx,sy:l.tf.sy}
+  };
+}
+function scaleRestore(l,b){
+  b.pts.forEach(function(q,i){
+    var p=l.pts[i]; if(!p) return;
+    p.x=q.x; p.y=q.y;
+    if(p.cmd==='quad'){ p.cx=q.cx; p.cy=q.cy; }
+    if(p.cmd==='cubic'){ p.c1x=q.c1x; p.c1y=q.c1y; p.c2x=q.c2x; p.c2y=q.c2y; }
+  });
+  l.g.x=b.g.x; l.g.y=b.g.y; l.g.w=b.g.w; l.g.h=b.g.h;
+  l.g.rx=b.g.rx; l.g.ry=b.g.ry;
+  l.text.x=b.text.x; l.text.y=b.text.y; l.text.size=b.text.size;
+  l.tf.sx=b.tf.sx; l.tf.sy=b.tf.sy;
+}
+// A Font size is a whole number, so text can only take the uniform part of a
+// scale into its geometry. The aspect goes to the transform; the rounding does
+// not -- half a point of font size is not worth an AffineTransform in the output.
+function scaleTextGeom(l,fx,fy,pv){
+  var R=Math.round, u=Math.sqrt(Math.abs(fx*fy))||1;
+  var ns=Math.max(4,R(l.text.size*u)), real=ns/(l.text.size||ns);
+  l.text.size=ns;
+  l.text.x=R(pv.x+(l.text.x-pv.x)*real);
+  l.text.y=R(pv.y+(l.text.y-pv.y)*real);
+  return {x:fx/u, y:fy/u};        // exactly 1 when the scale was uniform
+}
+function scaleLayer(l,fx,fy,pv,mode){
+  var R=Math.round;
+  function mx(v){ return pv.x+(v-pv.x)*fx; }
+  function my(v){ return pv.y+(v-pv.y)*fy; }
+  if(mode==='tf'){
+    // the transform pivots on the shape's own centre, so the shape only lands
+    // in the right place once that centre has been moved there
+    var c=centreOf(l);
+    l.tf.sx*=fx; l.tf.sy*=fy;
+    shiftLayer(l,R(mx(c.x)-c.x),R(my(c.y)-c.y));
+    return;
+  }
+  if(l.kind==='path'){
+    l.pts.forEach(function(p){
+      p.x=R(mx(p.x)); p.y=R(my(p.y));
+      if(p.cmd==='quad'){ p.cx=R(mx(p.cx)); p.cy=R(my(p.cy)); }
+      if(p.cmd==='cubic'){
+        p.c1x=R(mx(p.c1x)); p.c1y=R(my(p.c1y));
+        p.c2x=R(mx(p.c2x)); p.c2y=R(my(p.c2y));
+      }
+    });
+    return;
+  }
+  if(l.kind==='text'){
+    var a=scaleTextGeom(l,fx,fy,pv);
+    l.tf.sx*=a.x; l.tf.sy*=a.y;
+    return;
+  }
+  var g=norm(l.g);
+  l.g.x=R(mx(g.x)); l.g.y=R(my(g.y));
+  l.g.w=Math.max(1,R(g.w*fx)); l.g.h=Math.max(1,R(g.h*fy));
+  if(l.kind==='rect'){
+    l.g.rx=Math.max(0,R((l.g.rx||0)*fx));
+    l.g.ry=Math.max(0,R((l.g.ry||0)*fy));
+  }
+}
+// pivot defaults to the selection's centre; 'each' pins every shape to its own
+function scaleSelection(fx,fy,opts){
+  opts=opts||{};
+  var mode=opts.mode||S.scaleMode;
+  var each=(opts.each===undefined)?S.scaleEach:opts.each;
+  var pv=opts.pivot;
+  if(!pv){
+    var b=selScreenBox(); if(!b) return false;
+    pv={x:(b.x0+b.x1)/2, y:(b.y0+b.y1)/2};
+  }
+  S.selLayers.forEach(function(i){
+    var l=S.layers[i]; if(!l) return;
+    scaleLayer(l,fx,fy,each?centreOf(l):pv,mode);
+  });
+  return true;
+}
+function applyScale(fx,fy){
+  fx=scaleFactor(fx); fy=scaleFactor(fy);
+  if(Math.abs(fx-1)<1e-6&&Math.abs(fy-1)<1e-6) return;
+  if(!selScreenBox()){ toast('Nothing to scale yet'); return; }
+  push();
+  scaleSelection(fx,fy,{});
+  sync();
+}
+
+// Choosing geometry mode is a promise that the output carries no g2.scale(),
+// so a scale already sitting on the transform has to be folded into the
+// numbers. Rotation and shear stay put: no primitive can express those.
+function snapOne(v){ return Math.abs(v-1)<1e-6?1:v; }
+function bakeTfScale(l){
+  var sx=l.tf.sx, sy=l.tf.sy, R=Math.round;
+  if(snapOne(sx)===1&&snapOne(sy)===1) return true;
+  var c=centreOf(l), ax=Math.abs(sx)||1, ay=Math.abs(sy)||1;
+  var fx,fy;                                   // what actually leaves tf
+  function mx(v,f){ return R(c.x+(v-c.x)*f); }
+  function my(v,f){ return R(c.y+(v-c.y)*f); }
+
+  if(l.kind==='path'){
+    fx=sx; fy=sy;
+    l.pts.forEach(function(p){
+      p.x=mx(p.x,fx); p.y=my(p.y,fy);
+      if(p.cmd==='quad'){ p.cx=mx(p.cx,fx); p.cy=my(p.cy,fy); }
+      if(p.cmd==='cubic'){
+        p.c1x=mx(p.c1x,fx); p.c1y=my(p.c1y,fy);
+        p.c2x=mx(p.c2x,fx); p.c2y=my(p.c2y,fy);
+      }
+    });
+    l.tf.sx=1; l.tf.sy=1;
+  } else if(l.kind==='text'){
+    var a=scaleTextGeom(l,ax,ay,c);
+    l.tf.sx=snapOne((sx<0?-1:1)*a.x);
+    l.tf.sy=snapOne((sy<0?-1:1)*a.y);
+    fx=fy=1;                      // a uniform part slides past a shear untouched
+  } else {
+    // a box mirrored about its own centre is the same box, so only an image,
+    // whose pixels really do turn round, has to keep the sign
+    var keepSign=(l.kind==='image');
+    fx=keepSign?ax:sx; fy=keepSign?ay:sy;
+    var g=norm(l.g);
+    l.g.x=mx(g.x,ax); l.g.y=my(g.y,ay);
+    l.g.w=Math.max(1,R(g.w*ax)); l.g.h=Math.max(1,R(g.h*ay));
+    if(l.kind==='rect'){
+      l.g.rx=Math.max(0,R((l.g.rx||0)*ax));
+      l.g.ry=Math.max(0,R((l.g.ry||0)*ay));
+    }
+    if(l.kind==='arc'){                        // an arc mirrors through its angles
+      if(sx<0){ l.g.start=180-l.g.start; l.g.extent=-l.g.extent; }
+      if(sy<0){ l.g.start=-l.g.start; l.g.extent=-l.g.extent; }
+    }
+    l.tf.sx=(keepSign&&sx<0)?-1:1;
+    l.tf.sy=(keepSign&&sy<0)?-1:1;
+  }
+  // the shear runs after the scale, so it has to be re-read in the frame the
+  // scale leaves behind
+  if(l.tf.shx) l.tf.shx=l.tf.shx*fx/fy;
+  if(l.tf.shy) l.tf.shy=l.tf.shy*fy/fx;
+  // g2.scale used to grow the pen with the shape; the coordinates cannot, so
+  // the width comes across too and the drawing stays the one you had
+  var pen=Math.sqrt(ax*ay)||1;
+  if(Math.abs(pen-1)>1e-6) l.strokeW=Math.max(1,R(l.strokeW*pen));
+  return l.tf.sx===1&&l.tf.sy===1;
+}
+// returns the line to show, or '' when there was nothing on the transform
+function dropTfScale(){
+  var hit=[];
+  S.selLayers.forEach(function(i){
+    var l=S.layers[i];
+    if(l&&!(snapOne(l.tf.sx)===1&&snapOne(l.tf.sy)===1)) hit.push(l);
+  });
+  if(!hit.length) return '';
+  push();
+  var whole=true;
+  hit.forEach(function(l){ if(!bakeTfScale(l)) whole=false; });
+  sync();
+  return whole
+    ? 'Scale folded into the coordinates'
+    : 'Scale folded in, but a stretch only a transform can express stayed behind';
+}
+
 // handles live where the transform puts them, not where the raw numbers are
 function hitHandle(x,y){
   var l=L(); if(!l) return null;
@@ -1169,10 +1377,12 @@ function paintAll(c,z,actives,solid){
       var cp=shapePath(base);
       if(cp){
         c.save(); clipOn=true;
-        c.save();
-        c.setLineDash([6/z,4/z]); c.lineWidth=1/z; c.strokeStyle=rgba('#b02f4c',.7);
-        c.stroke(cp); c.setLineDash([]);
-        c.restore();
+        if(!solid){                  // the dashed guide is for the sheet only
+          c.save();
+          c.setLineDash([6/z,4/z]); c.lineWidth=1/z; c.strokeStyle=rgba('#b02f4c',.7);
+          c.stroke(cp); c.setLineDash([]);
+          c.restore();
+        }
         c.clip(cp);
       }
       return;
@@ -1205,6 +1415,7 @@ function draw(){
   drawSelOutlines();
   if(L()&&L().visible) drawHandles();
   drawRotHandle();
+  drawScaleHandles();
   if(S.marquee) drawMarquee();
 
   ctx.lineWidth=1/z; ctx.strokeStyle='#b9c6bd';
@@ -1212,6 +1423,7 @@ function draw(){
   ctx.restore();
 
   drawGuides(); drawRulers();
+  pvSchedule();
   if(textEdit) placeTextEditor();
 }
 
@@ -1419,6 +1631,25 @@ function drawRotHandle(){
     ctx.beginPath(); ctx.arc(h.pivot.x,h.pivot.y,Math.hypot(h.x-h.pivot.x,h.y-h.pivot.y),0,Math.PI*2);
     ctx.stroke(); ctx.setLineDash([]);
   }
+  ctx.restore();
+}
+function drawScaleHandles(){
+  var sh=scaleHandles(); if(!sh) return;
+  var z=S.view.z, px=function(n){ return n/z; }, live=!!S.scaleDrag;
+  var a=sh.grips[0], c=sh.grips[2];
+  ctx.save();
+  ctx.setLineDash([px(3),px(3)]); ctx.lineWidth=px(1);
+  ctx.strokeStyle=rgba('#2f6f8f',live?.85:.4);
+  ctx.strokeRect(a.x,a.y,c.x-a.x,c.y-a.y);
+  ctx.setLineDash([]);
+  // square and blue, so they read apart from the shape's own red grips
+  var s=px(4.5);
+  ctx.lineWidth=px(1.8); ctx.strokeStyle='#2f6f8f';
+  sh.grips.forEach(function(g){
+    ctx.fillStyle=live?'#2f6f8f':'#fff';
+    ctx.fillRect(g.x-s,g.y-s,s*2,s*2);
+    ctx.strokeRect(g.x-s,g.y-s,s*2,s*2);
+  });
   ctx.restore();
 }
 function drawMarquee(){
@@ -2362,6 +2593,7 @@ function syncProps(){
   document.getElementById('alignNote').textContent = nsel>1
     ? 'Aligning '+nsel+' shapes to their combined bounds.'
     : 'With one shape selected, align works against the sheet.';
+  syncScaleUI();
 
   document.getElementById('close').checked=l.closed;
   document.getElementById('close').disabled=isPoly;
@@ -2555,7 +2787,7 @@ function capture(e){
 }
 function clearDrags(){
   S.drag=null; S.moveDrag=null; S.panDrag=null; S.imgDrag=null;
-  S.newDrag=null; S.rotDrag=null; S.marquee=null;
+  S.newDrag=null; S.rotDrag=null; S.marquee=null; S.scaleDrag=null;
 }
 board.addEventListener('pointercancel',function(){ clearDrags(); draw(); });
 
@@ -2565,7 +2797,8 @@ board.addEventListener('pointermove',function(e){
 
   S.fine=fineOn(e);
   S.constrain=!!e.shiftKey;
-  if(e.buttons===0&&(S.drag||S.moveDrag||S.panDrag||S.imgDrag||S.newDrag||S.rotDrag||S.marquee)) clearDrags();
+  if(e.buttons===0&&(S.drag||S.moveDrag||S.panDrag||S.imgDrag||S.newDrag||S.rotDrag
+     ||S.scaleDrag||S.marquee)) clearDrags();
 
   if(S.marquee){ S.marquee.x1=s.x; S.marquee.y1=s.y; draw(); return; }
 
@@ -2586,6 +2819,33 @@ board.addEventListener('pointermove',function(e){
       b.off.x=tx; b.off.y=ty;
     });
     document.getElementById('coords').textContent=(d>0?'+':'')+d+'°';
+    syncProps(); emitCode(); draw(); renderLayers();
+    return;
+  }
+  if(S.scaleDrag){
+    var sd=S.scaleDrag, sp=sd.pivot, gp=sd.grip;
+    // the grip rides outside the box, so pull it back to the corner it stands for
+    var tx=snapV(s.x-gp.ox), ty=snapV(s.y-gp.oy);
+    var rx=sd.span.x?(tx-sp.x)/sd.span.x:null;
+    var ry=sd.span.y?(ty-sp.y)/sd.span.y:null;
+    var fx,fy;
+    if(S.constrain?!sd.lock:sd.lock){
+      // uniform: the diagonal ratio, which is what a corner drag reads as
+      fx=fy=(rx!==null&&ry!==null)
+        ? Math.hypot(tx-sp.x,ty-sp.y)/Math.hypot(sd.span.x,sd.span.y)
+        : (rx!==null?rx:(ry!==null?ry:1));
+    } else { fx=(rx===null?1:rx); fy=(ry===null?1:ry); }
+    fx=scaleFactor(fx); fy=scaleFactor(fy);
+    sd.base.forEach(function(o){
+      var l=S.layers[o.i]; if(l) scaleRestore(l,o.b);
+    });
+    // every pivot has to be read back after the rewind, not mid-rewrite
+    sd.base.forEach(function(o){
+      var l=S.layers[o.i]; if(!l) return;
+      scaleLayer(l,fx,fy,sd.each?centreOf(l):sp,sd.mode);
+    });
+    document.getElementById('coords').textContent=
+      '× '+fx.toFixed(2)+(Math.abs(fx-fy)<1e-6?'':'  × '+fy.toFixed(2));
     syncProps(); emitCode(); draw(); renderLayers();
     return;
   }
@@ -2663,8 +2923,12 @@ board.addEventListener('pointermove',function(e){
   }
   S.hover={x:snapV(s.x),y:snapV(s.y)};
   if(S.tool!=='pan'&&S.tool!=='image'){
-    var h=hitRot(s.x,s.y)||hitHandle(s.x,s.y);
-    board.style.cursor=h?'grab':(S.tool==='select'?'default':'crosshair');
+    var rot=hitRot(s.x,s.y);
+    var sg=rot?null:hitScale(s.x,s.y);
+    board.style.cursor = sg
+      ? ((sg.key==='nw'||sg.key==='se')?'nwse-resize':'nesw-resize')
+      : (rot||hitHandle(s.x,s.y))?'grab'
+      : (S.tool==='select'?'default':'crosshair');
   }
   draw();
 });
@@ -2719,6 +2983,18 @@ board.addEventListener('pointerdown',function(e){
         var l=S.layers[i];
         return {i:i,rot:l.tf.rot,start:l.g.start,c:centreOf(l),off:{x:0,y:0}};
       })};
+    board.style.cursor='grabbing';
+    return;
+  }
+
+  var sgrip=hitScale(s.x,s.y);
+  if(sgrip){
+    push();
+    S.scaleDrag={grip:sgrip, each:S.scaleEach, mode:S.scaleMode, lock:S.scaleLock,
+      pivot:{x:sgrip.px, y:sgrip.py},
+      span:{x:sgrip.cx-sgrip.px, y:sgrip.cy-sgrip.py},
+      base:S.selLayers.filter(function(i){ return !!S.layers[i]; })
+                      .map(function(i){ return {i:i, b:scaleBase(S.layers[i])}; })};
     board.style.cursor='grabbing';
     return;
   }
@@ -2868,6 +3144,18 @@ function showCtx(clientX,clientY){
     draw();
   },{checked:S.rotEach,disabled:n<2});
   ctxSep();
+  ctxItem('Scale 200%',function(){ applyScale(2,2); });
+  ctxItem('Scale 50%',function(){ applyScale(.5,.5); });
+  ctxItem('Scale through AffineTransform',function(){
+    setScaleMode(S.scaleMode==='tf'?'geom':'tf');
+  },{checked:S.scaleMode==='tf'});
+  ctxItem('Scale each in place',function(){
+    S.scaleEach=!S.scaleEach;
+    syncScaleUI();
+    toast(S.scaleEach?'Scaling grows each shape where it stands':'Scaling grows the selection as one');
+    draw();
+  },{checked:S.scaleEach,disabled:n<2});
+  ctxSep();
   ctxItem('Flip horizontal',function(){ flip(true); });
   ctxItem('Flip vertical',function(){ flip(false); });
   ctxSep();
@@ -2923,6 +3211,7 @@ board.addEventListener('pointerup',function(e){
   }
   if(S.drag){ S.drag=null; sync(); }
   if(S.rotDrag){ S.rotDrag=null; document.getElementById('coords').textContent='·'; sync(); }
+  if(S.scaleDrag){ S.scaleDrag=null; document.getElementById('coords').textContent='·'; sync(); }
   S.moveDrag=null; S.panDrag=null; S.imgDrag=null;
   board.style.cursor = S.tool==='pan'?'grab' : S.tool==='image'?'move'
                      : S.tool==='select'?'default':'crosshair';
@@ -2930,7 +3219,7 @@ board.addEventListener('pointerup',function(e){
 });
 
 board.addEventListener('pointerleave',function(){
-  if(!S.drag&&!S.panDrag&&!S.imgDrag&&!S.newDrag&&!S.moveDrag&&S.hover){
+  if(!S.drag&&!S.panDrag&&!S.imgDrag&&!S.newDrag&&!S.moveDrag&&!S.scaleDrag&&S.hover){
     S.hover=null; document.getElementById('coords').textContent='·'; draw();
   }
 });
@@ -3124,6 +3413,62 @@ document.getElementById('pty').addEventListener('input',function(){
 document.getElementById('distH').onclick=function(){ distributeSel(true); };
 document.getElementById('distV').onclick=function(){ distributeSel(false); };
 document.getElementById('buildOnce').onchange=function(){ emitCode(); };
+
+/* ---- scale selection: mode, multiplier, quick steps ---- */
+
+function setScaleMode(m){
+  S.scaleMode=(m==='tf')?'tf':'geom';
+  var folded=(S.scaleMode==='geom')?dropTfScale():'';
+  syncScaleUI();
+  draw();
+  toast(folded || (S.scaleMode==='tf'
+    ? 'Scaling now rides the AffineTransform'
+    : 'Scaling now rewrites the coordinates'));
+}
+function syncScaleUI(){
+  [].forEach.call(document.querySelectorAll('#scaleMode button'),function(b){
+    b.setAttribute('aria-pressed',String(b.dataset.sm===S.scaleMode));
+  });
+  document.getElementById('scLock').checked=S.scaleLock;
+  document.getElementById('scEach').checked=S.scaleEach;
+  document.getElementById('scEach').disabled=S.selLayers.length<2;
+  document.getElementById('scaleNote').innerHTML =
+    (S.scaleMode==='tf'
+      ? 'Rides the layer transform, so the output wraps the shape in <code>g2.scale(&hellip;)</code> '
+        +'about its own centre and the line width grows with it. The coordinates stay as they are.'
+      : 'Rewrites the coordinates, so the emitted Java needs no <code>AffineTransform</code>. '
+        +'Switching back to it folds any scale already on the transform into the numbers, '
+        +'line width and all; text keeps the uniform part in its font size.')
+    +' '+(S.scaleEach
+      ? 'Each shape grows where it stands.'
+      : 'The multiplier works about the selection&rsquo;s centre; the corner grips pivot on the opposite corner.');
+}
+document.getElementById('scaleMode').addEventListener('click',function(e){
+  var b=e.target.closest('button'); if(!b) return;
+  setScaleMode(b.dataset.sm);
+});
+document.getElementById('scLock').onchange=function(){
+  S.scaleLock=this.checked;
+  if(S.scaleLock) document.getElementById('scFy').value=document.getElementById('scFx').value;
+};
+document.getElementById('scEach').onchange=function(){
+  S.scaleEach=this.checked; syncScaleUI(); draw();
+};
+// with the aspect locked the two boxes are one number wearing two hats
+function linkScaleFields(from,to){
+  document.getElementById(from).addEventListener('input',function(){
+    if(S.scaleLock) document.getElementById(to).value=this.value;
+  });
+}
+linkScaleFields('scFx','scFy');
+linkScaleFields('scFy','scFx');
+document.getElementById('scApply').onclick=function(){
+  applyScale(document.getElementById('scFx').value,
+             document.getElementById('scFy').value);
+};
+document.getElementById('scHalf').onclick=function(){ applyScale(.5,.5); };
+document.getElementById('scUp').onclick=function(){ applyScale(1.25,1.25); };
+document.getElementById('scDouble').onclick=function(){ applyScale(2,2); };
 
 document.getElementById('flipH').onclick=function(){ flip(true); };
 document.getElementById('flipV').onclick=function(){ flip(false); };
@@ -3526,6 +3871,110 @@ document.getElementById('clearAll').onclick=function(){
   sync(); toast('Cleared. Ctrl+Z brings it back');
 };
 
+/* ================= window preview =================
+   The sheet is not a JPanel: it has a grid, rulers, handles and a zoom. This
+   renders the drawing the way Swing will, at 1:1, inside mocked frame chrome,
+   and puts the two sizes that actually differ side by side. */
+
+// a decorated JFrame on Windows at 100% scaling; getInsets() is the only truth
+// at runtime, which is why the emitted main() sizes the frame with pack()
+var PV_INSET={top:31,side:8,bottom:8};
+var pvOn=false, pvTick=null, pvPos=null;
+
+// the readout sits beside the mock above 860px and below it under that, so the
+// room left for the render changes axis with the layout
+function pvScale(){
+  var side=window.innerWidth>860;
+  var w=window.innerWidth-(side?390:56);
+  var h=window.innerHeight-(side?112:290);
+  return Math.min(1,Math.max(.1,Math.min(w/S.W,h/S.H)));
+}
+// how many shapes hang off the panel: the sheet border hides this, Swing will not
+function pvClipped(){
+  var n=0;
+  S.layers.forEach(function(l){
+    if(!l.visible) return;
+    var b=layerBox(l); if(!b) return;
+    if(b.x0<-0.5||b.y0<-0.5||b.x1>S.W+0.5||b.y1>S.H+0.5) n++;
+  });
+  return n;
+}
+function paintPreview(){
+  if(!pvOn) return;
+  var cv=document.getElementById('pvCanvas');
+  var dpr=window.devicePixelRatio||1, sc=pvScale();
+  var cw=Math.max(1,Math.round(S.W*sc)), ch=Math.max(1,Math.round(S.H*sc));
+  cv.style.width=cw+'px'; cv.style.height=ch+'px';
+  cv.width=Math.round(cw*dpr); cv.height=Math.round(ch*dpr);
+  var c=cv.getContext('2d');
+  c.setTransform(dpr*sc,0,0,dpr*sc,0,0);
+  c.imageSmoothingEnabled=S.aa;
+  c.fillStyle='#fff'; c.fillRect(0,0,S.W,S.H);
+  paintAll(c,1,[],true);          // solid: no dimming, no editor furniture
+
+  var cn=classNameOf();
+  document.getElementById('pvTitle').textContent=cn;
+  document.getElementById('pvPanel').textContent=S.W+' × '+S.H;
+  document.getElementById('pvFrame').textContent=
+    '≈ '+(S.W+PV_INSET.side*2)+' × '+(S.H+PV_INSET.top+PV_INSET.bottom);
+  document.getElementById('pvZoom').textContent=Math.round(sc*100)+'%';
+
+  var n=pvClipped();
+  document.getElementById('pvWarn').textContent = n
+    ? (n===1?'1 shape reaches past the panel and Swing will clip it.'
+            :n+' shapes reach past the panel and Swing will clip them.')
+    : '';
+  document.getElementById('pvNote').innerHTML =
+    'The panel is exactly the sheet. The frame is bigger by the window insets, which is '
+    +'why <code>pack()</code> in the emitted <code>main</code> is the only reliable way to '
+    +'get the panel you asked for &mdash; the frame figure above is an estimate for a '
+    +'Windows title bar and borders.'
+    +(sc<1?' Scaled down here to fit; the numbers are the real ones.':'');
+}
+// draw() runs per frame, so coalesce to one preview paint per frame
+function pvSchedule(){
+  if(!pvOn||pvTick) return;
+  pvTick=requestAnimationFrame(function(){ pvTick=null; paintPreview(); });
+}
+function pvPlace(){
+  var el=document.getElementById('preview');
+  var r=el.getBoundingClientRect();
+  if(!pvPos) pvPos={x:Math.max(8,(window.innerWidth-r.width)/2),
+                    y:Math.max(8,(window.innerHeight-r.height)/2)};
+  pvPos.x=Math.min(pvPos.x,Math.max(8,window.innerWidth-r.width-8));
+  pvPos.y=Math.min(pvPos.y,Math.max(8,window.innerHeight-r.height-8));
+  el.style.left=Math.max(8,pvPos.x)+'px';
+  el.style.top=Math.max(8,pvPos.y)+'px';
+}
+function showPreview(on){
+  pvOn=(on===undefined)?!pvOn:!!on;
+  document.getElementById('preview').classList.toggle('on',pvOn);
+  if(pvOn){ paintPreview(); pvPlace(); }
+  else if(pvTick){ cancelAnimationFrame(pvTick); pvTick=null; }
+}
+document.getElementById('pvClose').onclick=function(){ showPreview(false); };
+document.getElementById('openPreview').onclick=function(){ MENUCLOSE(); showPreview(true); };
+window.addEventListener('resize',function(){ if(pvOn){ paintPreview(); pvPlace(); } });
+
+document.getElementById('pvHead').addEventListener('pointerdown',function(e){
+  if(e.button!==0||e.target.closest('button')) return;
+  var head=this, el=document.getElementById('preview');
+  var r=el.getBoundingClientRect();
+  var off={x:e.clientX-r.left, y:e.clientY-r.top};
+  head.classList.add('drag');
+  try{ head.setPointerCapture(e.pointerId); }catch(err){}
+  function move(ev){ pvPos={x:ev.clientX-off.x, y:ev.clientY-off.y}; pvPlace(); }
+  function up(){
+    head.classList.remove('drag');
+    head.removeEventListener('pointermove',move);
+    head.removeEventListener('pointerup',up);
+    head.removeEventListener('pointercancel',up);
+  }
+  head.addEventListener('pointermove',move);
+  head.addEventListener('pointerup',up);
+  head.addEventListener('pointercancel',up);
+});
+
 /* ================= drawer, copy, toast ================= */
 
 document.getElementById('drawerBar').onclick=function(e){
@@ -3728,7 +4177,7 @@ window.addEventListener('blur',function(){
 });
 
 document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){ MENUCLOSE(); hideCtx(); }
+  if(e.key==='Escape'){ MENUCLOSE(); hideCtx(); if(pvOn) showPreview(false); }
   if(/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
   var k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey)&&k==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
@@ -3760,6 +4209,7 @@ document.addEventListener('keydown',function(e){
   else if(k==='g'){ S.showGrid=!S.showGrid; document.getElementById('gridChk').checked=S.showGrid; syncRail(); draw(); }
   else if(k==='s'){ S.snap=!S.snap; document.getElementById('snapChk').checked=S.snap; syncRail(); toast(S.snap?'Snap on':'Snap off'); }
   else if(k==='m'){ S.nextIsMove=true; if(S.tool==='select') setTool('line'); toast('Next click starts a new subpath'); }
+  else if(k==='p') showPreview();
   else if(k==='n') document.getElementById('addLayer').click();
   else if(k==='u'){ var l0=L(); if(l0.kind==='path'&&l0.pts.length){ push(); l0.pts.pop(); S.sel=null; sync(); } }
   else if(k==='delete'||k==='backspace'){
