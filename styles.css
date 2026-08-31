@@ -1,6 +1,6 @@
 
 :root{
-  --vellum:#eef1ea; --vellum-deep:#e3e8de; --ink:#17242b; --ink-soft:#54636b;
+  --vellum:#eef1ea; --vellum-deep:#e3e8de; --ink:#17242b; --ink-soft:#455259;
   --plot:#b02f4c; --panel:#f7f8f4; --edge:#ccd5cb; --rail:#20313a; --rail-soft:#a2b5be;
   --grip:#dfe5dc;
 }
@@ -75,9 +75,11 @@ header .spacer{flex:1}
 #rail::-webkit-scrollbar{width:0;height:0;display:none}
 #rail .tool{width:40px;height:40px;border:0;border-radius:6px;background:transparent;
   color:var(--rail-soft);cursor:pointer;display:flex;align-items:center;justify-content:center;
-  position:relative;flex-shrink:0}
+  position:relative;flex-shrink:0;
+  /* fades out slowly when the pointer leaves; the :hover rule snaps it in faster */
+  transition:background .24s ease,color .24s ease}
 #rail .tool svg{width:20px;height:20px}
-#rail .tool:hover{background:#2c414c;color:#e8eef1}
+#rail .tool:hover{background:#2c414c;color:#e8eef1;transition-duration:.1s}
 #rail .tool[aria-pressed="true"]{background:var(--vellum);color:var(--rail)}
 #rail .tool:disabled{opacity:.28;cursor:default}
 #rail .tool:disabled:hover{background:transparent;color:var(--rail-soft)}
@@ -125,6 +127,53 @@ pre#code{margin:0;flex:1;overflow:auto;padding:0 14px 12px;font-family:"IBM Plex
   font-size:12.5px;line-height:1.62;white-space:pre;color:var(--ink)}
 #code .kw{color:#2f6f8f} #code .num{color:var(--plot)} #code .cm{color:var(--ink-soft);font-style:italic}
 #code .str{color:#4f7a3a}
+
+/* empty-sheet placeholder: a drawing title block, the ruled corner panel that
+   real technical drawings carry. Values below are live, not decoration. */
+#blank{flex:1;overflow:auto;padding:2px 14px 8px;min-height:0}
+#drawer.shut #blank{display:none}
+#blank[hidden]{display:none}
+.tb{border:1px solid var(--edge);border-radius:4px;background:#fff;overflow:hidden;
+  max-width:560px;position:relative}
+/* registration tick in the corner, as on a plotted sheet */
+.tb::after{content:"";position:absolute;right:7px;top:7px;width:7px;height:7px;
+  border-top:1px solid var(--plot);border-right:1px solid var(--plot);opacity:.55}
+.tbrow{display:flex}
+.tbrow+.tbrow{border-top:1px solid var(--edge)}
+.tbcell{padding:5px 10px;min-width:0;flex:0 0 auto}
+.tbcell+.tbcell{border-left:1px solid var(--edge)}
+.tbcell.grow{flex:1 1 auto}
+.tbk{display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:600;
+  letter-spacing:.17em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:1px}
+.tbv{display:block;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tbv.strong{font-weight:600}
+.tbv.wait{color:var(--plot)}
+/* the dot pulses so the block reads as waiting on you, not as a static label */
+.tbv.wait::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--plot);margin-right:7px;vertical-align:1px;animation:tbpulse 2s ease-in-out infinite}
+@keyframes tbpulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+.tbsteps{margin:9px 0 0;padding:0;list-style:none;counter-reset:tbstep;
+  display:flex;flex-wrap:wrap;gap:5px 20px}
+.tbsteps li{counter-increment:tbstep;position:relative;padding-left:23px;
+  font-size:12px;color:var(--ink-soft)}
+.tbsteps li::before{content:counter(tbstep);position:absolute;left:0;top:0;width:17px;height:17px;
+  border:1px solid var(--edge);border-radius:50%;font-family:"IBM Plex Mono",monospace;font-size:10px;
+  font-weight:600;color:var(--ink-soft);display:flex;align-items:center;justify-content:center}
+.tbsteps code{color:var(--ink)}
+
+/* one staggered reveal on load rather than scattered micro-animation */
+#blank .tb,#blank .tbsteps li{animation:tbin .5s cubic-bezier(.2,.7,.3,1) backwards}
+#blank .tb{animation-delay:.04s}
+#blank .tbsteps li:nth-child(1){animation-delay:.13s}
+#blank .tbsteps li:nth-child(2){animation-delay:.19s}
+#blank .tbsteps li:nth-child(3){animation-delay:.25s}
+@keyframes tbin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  #blank .tb,#blank .tbsteps li{animation:none}
+  .tbv.wait::before{animation:none}
+}
 
 #side{width:322px;flex-shrink:0;border-left:1px solid var(--edge);background:var(--panel);
   display:flex;flex-direction:column;min-height:0;position:relative}
@@ -213,7 +262,87 @@ body.dragrow,body.dragrow *{user-select:none!important;-webkit-user-select:none!
 .layer.on .lname{color:var(--vellum)}
 .layer.on .lmeta{color:#93a6ae}
 .layer.hidden-l{opacity:.45}
-.layer.merged{margin-left:14px}
+/* ---- nesting in the shape stack ----
+   Two different relationships share one mechanic, told apart by glyph and colour,
+   the way Photoshop separates a clipping mask from everything else:
+     crimson down-arrow  = clipped by the region below it
+     operator glyph      = merged into the shape below it with a set operation
+   Children sit above their base (paint order), so the spine runs downward and
+   lands on an elbow drawn by the base row. */
+/* Indent with padding, not margin, so a child row and its base share one left
+   origin: the child's spine and the base's elbow then land on the same vertical
+   line no matter how deep the nesting goes. */
+/* the list runs front-to-back like Photoshop; say so, since the emitted Java
+   reads in the opposite direction (bottom row first) */
+.stackdir{font-family:"IBM Plex Mono",monospace;font-size:9px;font-weight:500;
+  letter-spacing:.12em;color:var(--ink-soft);margin-left:7px;text-transform:none}
+.layer{--nestlevel:0}
+/* both children and bases reserve the same connector gutter, so a child's spine
+   and its base's elbow sit on one line without either crossing a thumbnail */
+.layer.nested,.layer.runbase{padding-left:calc(6px + var(--nestlevel) * 22px + 16px)}
+.layer.nested,.layer.runbase{position:relative}
+
+/* the child's connector: spine down the gutter, stub turning into the row */
+.nestmark{position:absolute;top:0;bottom:0;width:15px;
+  left:calc(6px + (var(--nestlevel) - 1) * 22px + 4px);
+  display:flex;align-items:center;justify-content:center;pointer-events:auto}
+.nestmark::before{content:"";position:absolute;left:0;top:0;bottom:0;width:1px;
+  background:currentColor;opacity:.42}
+.nestmark::after{content:"";position:absolute;left:0;top:50%;width:15px;height:1px;
+  background:currentColor;opacity:.42}
+.nestmark>i{position:relative;font-style:normal;line-height:1;display:flex;
+  font-family:"IBM Plex Mono",monospace;font-size:12px;
+  background:var(--panel);padding:2px 1px}
+.nestmark>i svg{width:12px;height:14px;display:block}
+.nestmark.nest-clip{color:var(--plot)}
+.nestmark.nest-bool{color:var(--ink-soft)}
+/* the glyph masks the spine, so it must match whatever the row is sitting on */
+.layer.on .nestmark>i{background:var(--ink)}
+/* on the dark selected row the ink-toned spine and glyph vanish, so both the
+   connector and its marker switch to the light pair the row already uses */
+.layer.on .nestmark.nest-bool,.layer.on .nestbase.nest-bool{color:#93a6ae}
+.layer.on .nestmark.nest-clip,.layer.on .nestbase.nest-clip{color:#e2a3ad}
+.layer.on .nestmark::before,.layer.on .nestmark::after,.layer.on .nestbase{opacity:.7}
+.layer.sel .nestmark>i{background:#dfe7e1}
+.layer:hover .nestmark>i{background:#eef1e9}
+
+/* the base closes the run: the spine reaches its midpoint and stops */
+.nestbase{position:absolute;top:0;height:50%;width:1px;
+  left:calc(6px + var(--nestlevel) * 22px + 4px);
+  background:currentColor;opacity:.42;pointer-events:none}
+.nestbase.nest-clip{color:var(--plot)}
+.nestbase.nest-bool{color:var(--ink-soft)}
+
+/* a clip region is scaffolding, not paint: banded, tagged and never drawn */
+.layer.clipowner{background:rgba(176,47,76,.07)}
+.layer.clipowner.on{background:var(--ink)}
+.layer.clipowner .lname{text-decoration:underline;text-decoration-color:var(--plot);
+  text-underline-offset:3px;text-decoration-thickness:1.5px}
+.layer.clipowner .lmeta{color:var(--plot)}
+.layer.clipowner .thumb{outline:1px dashed var(--plot);outline-offset:-1px;opacity:.75}
+.layer.clipowner{position:relative}
+/* keep the meta line clear of the tag sitting at the row edge */
+.layer.clipowner .lbody{padding-right:38px}
+/* disclosure triangle on a base row, in the gutter its elbow already occupies */
+.twisty{position:absolute;left:calc(6px + var(--nestlevel) * 22px - 3px);top:50%;
+  transform:translateY(-50%);width:15px;height:15px;padding:0;border:0;border-radius:3px;
+  background:var(--panel);color:var(--ink-soft);cursor:pointer;display:flex;
+  align-items:center;justify-content:center;transition:background .14s,color .14s}
+.twisty svg{width:11px;height:11px;transition:transform .16s}
+.twisty.shut svg{transform:rotate(-90deg)}
+.twisty:hover{background:var(--vellum-deep);color:var(--ink)}
+.layer.on .twisty{background:var(--ink);color:#93a6ae}
+.layer.on .twisty:hover{background:#2c414c;color:var(--vellum)}
+.layer.sel .twisty{background:#dfe7e1}
+.layer.clipowner .twisty{background:#f6eaed}
+.layer.clipowner.on .twisty{background:var(--ink)}
+.masktag{position:absolute;right:30px;top:50%;transform:translateY(-50%);
+  padding:1px 4px;border-radius:2px;font-family:"IBM Plex Mono",monospace;font-size:9px;
+  font-weight:600;letter-spacing:.1em;background:var(--plot);color:#fff;pointer-events:none}
+.layer.clipowner.on .lmeta{color:#e2a3ad}
+/* the one case where the base's mode silently overrides the members' */
+.lmeta .warn{color:var(--plot);font-weight:600;cursor:help}
+.layer.on .lmeta .warn{color:#e2a3ad}
 .layer.grouped{margin-left:12px}
 .layer.grouped::before{content:"";position:absolute;left:-8px;top:1px;bottom:1px;width:3px;
   border-radius:2px;background:var(--gband,#8a5cc4)}
@@ -226,6 +355,9 @@ body.dragrow,body.dragrow *{user-select:none!important;-webkit-user-select:none!
 .lbody{flex:1;min-width:0}
 .lname{width:100%;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   background:transparent;border:0;color:var(--ink);font-family:"IBM Plex Sans",sans-serif;padding:1px 2px;display:block}
+.layer.clash .lname{box-shadow:inset 0 -1px 0 var(--plot)}
+.layer.clash .lmeta{color:var(--plot)}
+.layer.on.clash .lmeta{color:#e2a3ad}
 /* must out-rank ".layer.on .lname", or renaming the active row is white on white */
 .lname:focus,.layer.on .lname:focus{outline:1px solid var(--plot);background:#fff;
   color:var(--ink);border-radius:2px}
@@ -300,7 +432,107 @@ body.dragrow,body.dragrow *{user-select:none!important;-webkit-user-select:none!
 .pvRow span{color:var(--ink-soft)}
 .pvRow b{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:12.5px;font-weight:500}
 #pvWarn{color:var(--plot)}
+#pvWarn .pvpick{font:inherit;color:inherit;background:transparent;border:0;padding:0;cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+#pvWarn .pvpick:hover{background:rgba(176,47,76,.1);border-radius:2px}
+#pvWarn .pvpick:focus-visible{outline:2px solid var(--plot);outline-offset:1px}
 #pvWarn:empty,#pvNote:empty{display:none}
+
+/* ruler panel: the measurement list reads like the shape list, one row per figure */
+#measList{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+#measList .empty{font-size:12px;color:var(--ink-soft);padding:3px 1px 5px}
+.measrow{display:flex;align-items:center;gap:7px;padding:4px 5px;border:1px solid transparent;
+  border-radius:4px;cursor:pointer}
+.measrow:hover{background:var(--vellum-deep)}
+.measrow.on{background:#fff;border-color:var(--plot)}
+.measrow .mkind{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-soft);background:var(--vellum-deep);
+  border-radius:3px;padding:1px 5px;flex-shrink:0}
+.measrow.on .mkind{background:var(--vellum-deep)}
+.measrow .mval{font-family:"IBM Plex Mono",monospace;font-size:12.5px;flex-shrink:0}
+.measrow .mof{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:11.5px;color:var(--ink-soft)}
+.measrow .x{border:0;background:transparent;cursor:pointer;color:var(--ink-soft);font-size:15px;
+  line-height:1;padding:0 2px;flex-shrink:0}
+.measrow .x:hover{color:var(--plot)}
+#measDetail{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink)}
+#measDetail:empty,#measModeNote:empty{display:none}
+
+/* set operation lab: a scratch sheet for Area algebra. Non-modal like the
+   preview, so the real sheet stays in view while an expression is tried out. */
+#setlab{position:fixed;z-index:46;display:none;flex-direction:column;background:var(--panel);
+  border:1px solid var(--edge);border-radius:8px;padding:11px;
+  box-shadow:0 12px 34px rgba(23,36,43,.26);
+  width:min(1140px,calc(100vw - 24px));height:min(760px,calc(100vh - 24px))}
+#setlab.on{display:flex}
+#slHead{display:flex;align-items:center;gap:10px;margin-bottom:10px;cursor:grab;
+  user-select:none;touch-action:none;flex-shrink:0}
+#slHead.drag{cursor:grabbing}
+#slHead .stag{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em;
+  color:var(--ink-soft)}
+#slHeadName{font-size:13px;color:var(--ink-soft)}
+#slHead .spacer{flex:1}
+#slHead .act{padding:4px 10px;font-size:11.5px}
+
+#slBody{display:flex;gap:12px;flex:1;min-height:0}
+#slLeft{width:218px;flex-shrink:0;display:flex;flex-direction:column;min-height:0;
+  overflow-y:auto;padding-right:3px}
+#slMid{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+#slRight{width:302px;flex-shrink:0;display:flex;flex-direction:column;min-height:0;
+  overflow-y:auto;padding-right:3px}
+#slLeft h3,#slRight h3{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 7px}
+#slRight h3{margin-top:13px}
+#slRight h3:first-child{margin-top:0}
+
+#slSheet{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  background:var(--vellum-deep);border:1px solid var(--edge);border-radius:5px;overflow:hidden}
+#slCanvas{display:block;box-shadow:0 1px 6px rgba(23,36,43,.16);touch-action:none}
+#slStatus{display:flex;align-items:baseline;gap:9px;flex-shrink:0;font-size:12.5px;
+  color:var(--ink-soft);min-height:18px}
+#slStatus .stag{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em}
+#slStat{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink)}
+#slStat.bad{color:var(--plot)}
+
+#slList{display:flex;flex-direction:column;gap:2px}
+#slList .empty{font-size:12px;color:var(--ink-soft);padding:3px 1px 5px}
+.slrow{display:flex;align-items:center;gap:7px;padding:4px 5px;border:1px solid transparent;
+  border-radius:4px;cursor:pointer}
+.slrow:hover{background:var(--vellum-deep)}
+.slrow.on{background:#fff;border-color:var(--plot)}
+.sltag{width:19px;height:19px;border-radius:3px;display:flex;align-items:center;
+  justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;
+  color:#fff;flex-shrink:0}
+.slrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:12.5px}
+.slrow .kd{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-soft)}
+.slrow .x{border:0;background:transparent;cursor:pointer;color:var(--ink-soft);font-size:15px;
+  line-height:1;padding:0 2px;flex-shrink:0}
+.slrow .x:hover{color:var(--plot)}
+#slProps{margin-top:11px;border-top:1px solid var(--edge);padding-top:10px}
+#slProps:empty{display:none}
+#slProps .row{margin-top:7px}
+#slProps .row:first-child{margin-top:0}
+
+#slExpr{width:100%;padding:7px 8px;border:1px solid var(--edge);border-radius:3px;
+  font-family:"IBM Plex Mono",monospace;font-size:15px;line-height:1.4;background:#fff;
+  color:var(--ink);resize:vertical;min-height:46px}
+#slOps{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:6px}
+#slOps button{padding:5px 0;font-size:14px}
+#slErr{color:var(--plot)}
+#slErr:empty,#slInsNote:empty{display:none}
+
+pre#slCode{flex:1;min-height:110px;overflow:auto;margin:0;padding:9px 10px;background:#fff;
+  border:1px solid var(--edge);border-radius:4px;font-family:"IBM Plex Mono",monospace;
+  font-size:11.5px;line-height:1.55;white-space:pre;color:var(--ink)}
+#slCode .kw{color:#2f6f8f} #slCode .num{color:var(--plot)}
+#slCode .cm{color:var(--ink-soft);font-style:italic} #slCode .str{color:#4f7a3a}
+
+@media (max-width:1000px){
+  #slBody{flex-direction:column;overflow-y:auto}
+  #slLeft,#slRight{width:auto;overflow:visible}
+  #slMid{min-height:320px}
+}
 
 @media (max-width:920px){
   #shell{flex-direction:column;overflow:auto}

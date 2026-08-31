@@ -29,6 +29,28 @@
         <div class="row">
           <div class="field"><label for="className">Class name for “full class” output</label><input id="className" type="text" value="ShapePanel"></div>
         </div>
+        <div class="row">
+          <div class="field"><label for="varPrefix">Field prefix (optional)</label><input id="varPrefix" type="text" value="" placeholder="none"></div>
+          <div class="field"><label for="g2Name">Graphics2D variable</label><input id="g2Name" type="text" value="g2" placeholder="g2"></div>
+        </div>
+        <p class="note">Every paint call is written through the <code>Graphics2D</code> name above &mdash; set it to <code>g2d</code> and the whole output follows. Shape names become the Java variable names &mdash; rename a shape in the list to rename its variable. A prefix keeps them clear of fields your class already has.</p>
+        <hr>
+        <h3>Coordinates</h3>
+        <div class="row">
+          <div class="field"><label for="precision">Decimal places</label><input id="precision" type="number" min="0" max="6" step="1" value="2"></div>
+          <div class="field"><button class="act" id="precWhole" style="width:100%">Whole pixels</button></div>
+        </div>
+        <p class="note" id="precNote"></p>
+        <hr>
+        <h3>Panel background</h3>
+        <div class="row">
+          <div class="field"><label for="bgCol">Colour</label><input id="bgCol" type="color" value="#ffffff"></div>
+          <div class="field"><button class="act" id="bgWhite" style="width:100%">White</button></div>
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" id="bgSet" checked> Emit <code>setBackground()</code></label>
+        </div>
+        <p class="note" id="bgNote"></p>
       </div>
     </div>
 
@@ -44,7 +66,9 @@
           <label><input type="checkbox" id="snapChk" checked> Snap <kbd>S</kbd></label>
           <label><input type="checkbox" id="labelsChk" checked> Point labels</label>
           <label><input type="checkbox" id="aaChk" checked> Antialiasing</label>
+          <label><input type="checkbox" id="solidChk"> True opacity <kbd>D</kbd></label>
         </div>
+        <p class="note">The sheet dims everything outside the selection to 45% so the selected shape reads clearly. <em>True opacity</em> paints every shape at its real alpha instead &mdash; what the panel will actually look like.</p>
         <hr>
         <h3>Grid look</h3>
         <div class="row">
@@ -94,6 +118,7 @@
           <button class="act" id="openProj">Open .json</button>
           <button class="act" id="exportPng">Export PNG</button>
           <button class="act" id="openPreview">Preview window…</button>
+          <button class="act" id="openSetLab">Set operation lab…</button>
           <button class="act" id="clearAll">Start over</button>
         </div>
         <input type="file" id="projFile" accept="application/json,.json" hidden>
@@ -144,6 +169,26 @@
         <button class="act primary" id="copy" style="padding:5px 12px">Copy code</button>
       </div>
       <pre id="code"></pre>
+      <!-- shown instead of the code while the sheet is still empty -->
+      <div id="blank" hidden>
+        <div class="tb">
+          <div class="tbrow">
+            <div class="tbcell grow"><span class="tbk">drawing</span><span class="tbv strong">Untitled sheet</span></div>
+            <div class="tbcell"><span class="tbk">size</span><span class="tbv" id="tbSize">600 &times; 450</span></div>
+            <div class="tbcell"><span class="tbk">grid</span><span class="tbv" id="tbGrid">25 px</span></div>
+          </div>
+          <div class="tbrow">
+            <div class="tbcell grow"><span class="tbk">status</span><span class="tbv wait">awaiting first shape</span></div>
+            <div class="tbcell"><span class="tbk">tool</span><span class="tbv" id="tbTool">line</span></div>
+            <div class="tbcell"><span class="tbk">output</span><span class="tbv" id="tbOut">fragment</span></div>
+          </div>
+        </div>
+        <ol class="tbsteps">
+          <li>Pick a tool from the rail &mdash; <kbd>R</kbd> rectangle, <kbd>E</kbd> ellipse, <kbd>1</kbd> line</li>
+          <li>Drag on the sheet to lay the shape down</li>
+          <li>Java appears here, ready for your <code>JPanel</code></li>
+        </ol>
+      </div>
     </div>
   </div>
 
@@ -153,6 +198,7 @@
       <button role="tab" data-p="shape"  aria-selected="true">Shape</button>
       <button role="tab" data-p="style"  aria-selected="false">Style</button>
       <button role="tab" data-p="image"  aria-selected="false">Image</button>
+      <button role="tab" data-p="ruler"  aria-selected="false">Ruler</button>
     </div>
 
     <div id="props">
@@ -298,8 +344,55 @@
           </div>
           <div class="checks">
             <label><input type="checkbox" id="isClip"> Use as clip region</label>
+            <label><input type="checkbox" id="clippedChk"> Clip to region above</label>
           </div>
-          <p class="note" id="clipNote">A clip shape is not drawn itself. Everything above it is confined to it until another clip replaces it.</p>
+          <p class="note" id="clipNote"></p>
+        </div>
+      </div>
+
+
+      <!-- ============ RULER ============ -->
+      <div class="pane" data-pane="ruler">
+        <div class="group">
+          <h2>Measure</h2>
+          <div class="seg" id="measMode">
+            <button data-mm="span"  aria-pressed="true">distance</button>
+            <button data-mm="angle" aria-pressed="false">angle</button>
+            <button data-mm="gap"   aria-pressed="false">gap</button>
+          </div>
+          <p class="note" id="measModeNote"></p>
+          <div class="checks">
+            <label><input type="checkbox" id="measShow" checked> Show measurements</label>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Snap to</h2>
+          <div class="checks" id="measSnaps">
+            <label><input type="checkbox" id="snap_endpoint" checked> Endpoints</label>
+            <label><input type="checkbox" id="snap_midpoint" checked> Midpoints</label>
+            <label><input type="checkbox" id="snap_centre" checked> Centres</label>
+            <label><input type="checkbox" id="snap_quadrant" checked> Quadrants</label>
+            <label><input type="checkbox" id="snap_intersection" checked> Intersections</label>
+            <label><input type="checkbox" id="snap_grid" checked> Grid</label>
+          </div>
+          <p class="note">The end you are about to place is named on the sheet before you
+            commit it, so &ldquo;midpoint&rdquo; means the real midpoint of that segment
+            &mdash; not the nearest grid line to your click.</p>
+        </div>
+
+        <div class="group">
+          <h2>Measurements</h2>
+          <div id="measList"></div>
+          <p class="note" id="measDetail"></p>
+          <div class="btns">
+            <button class="act" id="measDel">Delete selected</button>
+            <button class="act" id="measClear">Clear all</button>
+          </div>
+          <p class="note">Measurements are editor furniture: they save with the project,
+            never reach the Java, and never appear in the window preview or an exported
+            PNG. They keep the coordinates they were taken at, so moving a shape afterwards
+            leaves its measurement where it was.</p>
         </div>
       </div>
 
@@ -481,13 +574,14 @@
 
     <div id="stackwrap">
       <div id="stackhead">
-        <h2>Shapes</h2>
+        <h2 title="Top of the list paints last, so it sits in front. The bottom row is painted first and sits behind.">Shapes <span class="stackdir">front ↑</span></h2>
         <div class="hbtns">
           <button class="act" id="addLayer" title="New shape layer (N)">New</button>
           <button class="act" id="dupLayer" title="Duplicate the selection (Ctrl+D)">Dupe</button>
           <button class="act" id="groupLayer" title="Group the selection (Ctrl+G)">Group</button>
           <button class="act" id="ungroupLayer" title="Ungroup (Ctrl+Shift+G)">Ungroup</button>
           <button class="act" id="delLayer" title="Delete the selection">Del</button>
+          <button class="act" id="foldAll" title="Fold every clip region and boolean run down to one row">Fold</button>
         </div>
       </div>
       <div id="stack"><div id="dropline"></div></div>
@@ -527,6 +621,72 @@
   </div>
 </div>
 
+<div id="setlab" role="dialog" aria-label="Set operation lab">
+  <div id="slHead">
+    <span class="stag">SET LAB</span>
+    <span id="slHeadName">Scratch sheet for <code>Area</code> algebra</span>
+    <span class="spacer"></span>
+    <label class="onceBox"><input type="checkbox" id="slGhost" checked> operands</label>
+    <label class="onceBox"><input type="checkbox" id="slSnap" checked> snap</label>
+    <button class="act" id="slClose">Close</button>
+  </div>
+
+  <div id="slBody">
+
+    <!-- operands: the letters the expression talks about -->
+    <div id="slLeft">
+      <h3>Operands</h3>
+      <div id="slList"></div>
+      <div class="btns three" id="slAdd">
+        <button class="act" data-add="rect">rect</button>
+        <button class="act" data-add="ellipse">ellipse</button>
+        <button class="act" data-add="arc">arc</button>
+        <button class="act" data-add="triangle">triangle</button>
+        <button class="act" data-add="star">star</button>
+        <button class="act" data-add="hexagon">hexagon</button>
+      </div>
+      <div class="btns">
+        <button class="act" data-add="text">text</button>
+        <button class="act" id="slPull">From sheet</button>
+      </div>
+      <div id="slProps"></div>
+    </div>
+
+    <!-- the scratch sheet: same coordinate space as the real one -->
+    <div id="slMid">
+      <div id="slSheet"><canvas id="slCanvas"></canvas></div>
+      <div id="slStatus"><span class="stag">result</span><span id="slStat">&mdash;</span></div>
+    </div>
+
+    <!-- the algebra, and what Java it turns into -->
+    <div id="slRight">
+      <h3>Expression</h3>
+      <textarea id="slExpr" spellcheck="false" rows="2">A &minus; B</textarea>
+      <div id="slOps">
+        <button class="act" data-ins="&cup;" title="union — add">&cup;</button>
+        <button class="act" data-ins="&minus;" title="difference — subtract">&minus;</button>
+        <button class="act" data-ins="&cap;" title="intersection — intersect">&cap;</button>
+        <button class="act" data-ins="&oplus;" title="symmetric difference — exclusiveOr">&oplus;</button>
+        <button class="act" data-ins="(" title="open a group">(</button>
+        <button class="act" data-ins=")" title="close a group">)</button>
+      </div>
+      <p class="note" id="slErr"></p>
+      <p class="note">&cap; binds tightest, then &minus;, then &cup; and &oplus;. Brackets beat all of them. <code>+ - &amp; ^</code> work as plain-keyboard stand-ins.</p>
+
+      <h3>Java</h3>
+      <pre id="slCode"></pre>
+      <div class="btns">
+        <button class="act" id="slCopy">Copy Java</button>
+        <button class="act" id="slInsertOps">Insert operands</button>
+      </div>
+      <div class="btns" style="grid-template-columns:1fr">
+        <button class="act primary" id="slInsert">Insert result outline</button>
+      </div>
+      <p class="note" id="slInsNote"></p>
+    </div>
+  </div>
+</div>
+
 <div id="help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
   <div id="helpBox">
     <button class="act" id="helpClose">Close</button>
@@ -539,6 +699,7 @@
       <tr><td><kbd>A</kbd></td><td>Arc</td></tr>
       <tr><td><kbd>T</kbd></td><td>Text</td></tr>
       <tr><td><kbd>H</kbd></td><td>Pan the canvas</td></tr>
+      <tr><td><kbd>L</kbd></td><td>Ruler: measure distances, angles and gaps</td></tr>
       <tr><td><kbd>I</kbd></td><td>Move and resize the trace image</td></tr>
     </table>
     <h3>Editing</h3>
@@ -552,6 +713,7 @@
       <tr><td>Double-click text</td><td>Type straight onto the sheet</td></tr>
       <tr><td>Right-click</td><td>Rotate, flip, group and delete the selection</td></tr>
       <tr><td>Rotate handle</td><td>The round grip above the selection; <kbd>Snap</kbd> steps it by 15°</td></tr>
+      <tr><td>Hold <kbd>Ctrl</kbd></td><td>Show the scale grips around the selection, then drag a corner</td></tr>
       <tr><td>Arc grips</td><td>Drag the two round handles to set start° and extent°</td></tr>
       <tr><td><kbd>M</kbd></td><td>Start a new subpath</td></tr>
       <tr><td><kbd>N</kbd></td><td>New shape layer</td></tr>
@@ -575,6 +737,7 @@
       <tr><td><kbd>0</kbd></td><td>Fit to window</td></tr>
       <tr><td><kbd>G</kbd> <kbd>S</kbd></td><td>Grid, snap</td></tr>
       <tr><td><kbd>P</kbd></td><td>Preview the Java window at 1:1, with its real dimensions</td></tr>
+      <tr><td><kbd>B</kbd></td><td>Set operation lab: try <code>Area</code> algebra off the sheet</td></tr>
       <tr><td><kbd>?</kbd></td><td>This panel</td></tr>
     </table>
   </div>

@@ -13,15 +13,19 @@ var hitCv=document.createElement('canvas'), hitCtx=hitCv.getContext('2d');
 
 var S={
   W:600,H:450,grid:25,snap:true,showGrid:true,labels:true,aa:true,
-  gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines',
+  gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines',solidView:false,
   tool:'line', out:'frag',
   view:{z:1,x:0,y:0},
   layers:[],active:0,selLayers:[0],
   sel:null,drag:null,hover:null,nextIsMove:false,
   panDrag:null,imgDrag:null,newDrag:null,moveDrag:null,rotDrag:null,marquee:null,
   scaleDrag:null,scaleMode:'geom',scaleEach:false,scaleLock:true,
-  fine:false,constrain:false,fineStep:1,fineKey:'alt',rotEach:false,
-  img:null,imgTop:false,imgLock:false
+  bg:'#ffffff',bgSet:true,varPrefix:'',g2Name:'g2',precision:2,
+  fine:false,constrain:false,scaleMod:false,fineStep:1,fineKey:'alt',rotEach:false,
+  img:null,imgTop:false,imgLock:false,
+  measures:[],measMode:'span',measSel:-1,measShow:true,measGapFrom:-1,
+  measSnaps:['endpoint','midpoint','centre','quadrant','intersection','grid'],
+  measDraft:null,measDrag:null,measHover:null
 };
 var HIST=[],FUT=[];
 var GID=0;
@@ -39,7 +43,7 @@ function defaults(name,kind){
     fillColor:c,fillColor2:'#ffffff',gradAngle:0,alpha:1,
     strokeColor:c,strokeW:2,
     cap:'square',join:'miter',miter:10,dash:'',dashPhase:0,
-    closed:true,wind:'nonzero',shapeClass:'GeneralPath',combine:'none',isClip:false,
+    closed:true,wind:'nonzero',shapeClass:'GeneralPath',combine:'none',isClip:false,clipped:false,collapsed:false,
     tf:{rot:0,sx:1,sy:1,shx:0,shy:0}};
 }
 var CAPS={butt:1,round:1,square:1}, JOINS={miter:1,round:1,bevel:1};
@@ -145,15 +149,23 @@ function moveLayers(idxs,target){
 /* ================= history ================= */
 
 function snapshot(){
-  return JSON.stringify({layers:S.layers,active:S.active,sel:S.selLayers,W:S.W,H:S.H});
+  return JSON.stringify({layers:S.layers,active:S.active,sel:S.selLayers,W:S.W,H:S.H,
+    measures:S.measures,measSel:S.measSel});
 }
 function push(){ HIST.push(snapshot()); if(HIST.length>80) HIST.shift(); FUT.length=0; }
 function restore(str){
   var st=JSON.parse(str);
+  var folds=S.layers.map(function(l){ return !!l.collapsed; });
   S.layers=st.layers.map(normalize);
+  // fold is how the list is being read, not part of the drawing; a stale flag on
+  // a row that is no longer a base is inert, so index carry-over is enough
+  S.layers.forEach(function(l,i){ if(folds[i]!==undefined) l.collapsed=folds[i]; });
   S.active=Math.min(st.active,st.layers.length-1);
   S.selLayers=st.sel||[S.active];
   S.W=st.W; S.H=st.H; S.sel=null;
+  S.measures=st.measures||[];
+  S.measSel=Math.min(st.measSel===undefined?-1:st.measSel,S.measures.length-1);
+  S.measDraft=null; S.measGapFrom=-1;
   document.getElementById('w').value=S.W;
   document.getElementById('h').value=S.H;
   sync();
@@ -795,8 +807,7 @@ function computeArea(grp){
   if(bm){ try{ baseInv=bm.inverse(); }catch(e){ baseInv=null; } }
   var members=[],i;
   for(i=0;i<grp.length;i++){
-    var rings=memberRings(grp[i],baseInv);
-    if(!rings||!rings.length) return null;
+    var rings=memberRings(grp[i],baseInv)||[];   // blank text, a stub path: empty, not fatal
     members.push({rings:rings, op:grp[i].combine,
       wind:(grp[i].kind==='text'||grp[i].wind==='evenodd')?'evenodd':'nonzero',
       path:ringsToPath(rings)});
@@ -976,6 +987,7 @@ function scaleHandles(){
     {key:'sw',x:b.x0-d,y:b.y1+d,cx:b.x0,cy:b.y1,px:b.x1,py:b.y0,ox:-d,oy: d}]};
 }
 function hitScale(x,y){
+  if(!scaleArmed()) return null;
   var sh=scaleHandles(); if(!sh) return null;
   var best=null, bd=SCALE_GRIP/S.view.z;
   sh.grips.forEach(function(g){
@@ -1277,6 +1289,53 @@ function resize(){
 
 /* ================= painting ================= */
 
+// ---- clip scopes ----
+// A clip region owns the run of `clipped` layers that follows it. A clipped clip
+// nests inside the one above (its region intersects); an unclipped layer closes
+// every open scope. Returns, per layer, the stack of clip indices enclosing it.
+function clipScopes(){
+  var out=new Array(S.layers.length), stack=[];
+  S.layers.forEach(function(l,i){
+    if(!l.clipped) stack=[];          // an unclipped layer ends every open scope
+    out[i]=stack.slice();             // the scopes this layer is painted inside
+    if(l.isClip) stack=stack.concat([i]);
+  });
+  return out;
+}
+// which rows a collapsed base is hiding. A clip region folds away everything in
+// its scope (nested regions included); a boolean base folds the run merged into it
+function collapsedRows(){
+  var sc=clipScopes(), merged=mergedLayers(), skip={};
+  S.layers.forEach(function(l,i){
+    if(!l.collapsed) return;
+    if(l.isClip) S.layers.forEach(function(o,j){ if((sc[j]||[]).indexOf(i)>=0) skip[j]=1; });
+    for(var j=i+1;j<S.layers.length&&merged.indexOf(S.layers[j])>=0;j++) skip[j]=1;
+  });
+  // a hidden base takes its boolean run with it, or the members are left orphaned
+  for(var k=0;k<S.layers.length;k++){
+    if(!skip[k]) continue;
+    for(var m=k+1;m<S.layers.length&&merged.indexOf(S.layers[m])>=0;m++) skip[m]=1;
+  }
+  return skip;
+}
+// how many rows this base would fold away, for the count on a collapsed row
+function foldCount(i){
+  var sc=clipScopes(), merged=mergedLayers(), l=S.layers[i], hit={}, j, k, m;
+  if(l.isClip) S.layers.forEach(function(o,q){ if((sc[q]||[]).indexOf(i)>=0) hit[q]=1; });
+  for(j=i+1;j<S.layers.length&&merged.indexOf(S.layers[j])>=0;j++) hit[j]=1;
+  for(k=0;k<S.layers.length;k++){          // a hidden base takes its run with it
+    if(!hit[k]) continue;
+    for(m=k+1;m<S.layers.length&&merged.indexOf(S.layers[m])>=0;m++) hit[m]=1;
+  }
+  return Object.keys(hit).length;
+}
+function clipDepth(i){ var sc=clipScopes(); return sc[i]?sc[i].length:0; }
+// a clip region with nothing under it silently does nothing; worth saying so
+function clipOwns(i){
+  var n=0;
+  for(var j=i+1;j<S.layers.length;j++){ if(!S.layers[j].clipped) break; n++; }
+  return n;
+}
 function groups(){
   var gs=[];
   S.layers.forEach(function(l){
@@ -1369,27 +1428,36 @@ function paintGroup(c,grp,z,actives,solid){
 }
 
 function paintAll(c,z,actives,solid){
-  var clipOn=false;
+  var sc=clipScopes(), open=0;         // how many canvas clips are currently pushed
+  function reopen(want){               // unwind to the depth this layer belongs at
+    while(open>want){ c.restore(); open--; }
+  }
   groups().forEach(function(g){
-    var base=g[0];
+    var base=g[0], idx=S.layers.indexOf(base);
+    var depth=(idx>=0&&sc[idx])?sc[idx].length:0;
+    reopen(depth);
     if(base.isClip&&g.length===1){
-      if(clipOn){ c.restore(); clipOn=false; }
       var cp=shapePath(base);
-      if(cp){
-        c.save(); clipOn=true;
+      if(cp&&clipOwns(idx)){       // a region with nothing under it clips nothing
         if(!solid){                  // the dashed guide is for the sheet only
           c.save();
           c.setLineDash([6/z,4/z]); c.lineWidth=1/z; c.strokeStyle=rgba('#b02f4c',.7);
           c.stroke(cp); c.setLineDash([]);
           c.restore();
         }
+        c.save(); open++;            // nested clips intersect, they do not replace
         c.clip(cp);
+      } else if(cp&&!solid){       // still show the region so it can be found
+        c.save();
+        c.setLineDash([6/z,4/z]); c.lineWidth=1/z; c.strokeStyle=rgba('#b02f4c',.35);
+        c.stroke(cp); c.setLineDash([]);
+        c.restore();
       }
       return;
     }
     paintGroup(c,g,z,actives,solid);
   });
-  if(clipOn) c.restore();
+  reopen(0);
 }
 
 function draw(){
@@ -1406,17 +1474,21 @@ function draw(){
   ctx.translate(GUT+S.view.x,GUT+S.view.y);
   ctx.scale(z,z);
 
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,S.W,S.H);
+  ctx.fillStyle=sheetBg(); ctx.fillRect(0,0,S.W,S.H);
   if(S.img&&!S.imgTop) drawImg();
   if(S.showGrid) drawGrid();
   if(S.img&&S.imgTop) drawImg();
 
-  paintAll(ctx,z,selObjs(),false);
+  // solidView paints every shape at its real alpha, the way the panel will look;
+  // otherwise anything outside the selection drops to 45% so the selection reads
+  paintAll(ctx,z,selObjs(),S.solidView);
   drawSelOutlines();
   if(L()&&L().visible) drawHandles();
   drawRotHandle();
   drawScaleHandles();
+  drawSelSize();
   if(S.marquee) drawMarquee();
+  drawMeasures();
 
   ctx.lineWidth=1/z; ctx.strokeStyle='#b9c6bd';
   ctx.strokeRect(0,0,S.W,S.H);
@@ -1442,6 +1514,12 @@ function drawImg(){
   }
   ctx.restore();
 }
+
+/* Swing has no "unset" background: JPanel is opaque, so super.paintComponent
+   fills with getBackground(). With nothing emitted that is the look-and-feel's
+   control colour, never white -- which is what the sheet used to imply. */
+var LAF_BG='#eeeeee';                  // Metal's default; the platform varies
+function sheetBg(){ return S.bgSet?S.bg:LAF_BG; }
 
 var GRID_DEFAULTS={gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines'};
 var MINOR_FADE=0.35;   // keeps the default look close to the old fixed palette
@@ -1633,7 +1711,9 @@ function drawRotHandle(){
   }
   ctx.restore();
 }
+function scaleArmed(){ return S.scaleMod||!!S.scaleDrag; }
 function drawScaleHandles(){
+  if(!scaleArmed()) return;
   var sh=scaleHandles(); if(!sh) return;
   var z=S.view.z, px=function(n){ return n/z; }, live=!!S.scaleDrag;
   var a=sh.grips[0], c=sh.grips[2];
@@ -1650,6 +1730,33 @@ function drawScaleHandles(){
     ctx.fillRect(g.x-s,g.y-s,s*2,s*2);
     ctx.strokeRect(g.x-s,g.y-s,s*2,s*2);
   });
+  ctx.restore();
+}
+/* A size readout on the selection: the figure you are about to type into the
+   Java, sitting where you are already looking. A single shape reports its own
+   geometry -- what Rectangle2D.Double actually receives -- rather than the
+   axis-aligned box a rotation would inflate it to, so the number matches the
+   output. A multi-selection has no geometry of its own, so it reports the
+   combined extent, which is what its box is drawn around anyway. */
+function selSize(){
+  if(S.selLayers.length===1){
+    var l=S.layers[S.selLayers[0]];
+    if(!l||!l.visible) return null;
+    var b=layerBounds(l), box=layerBox(l);
+    return (b&&box)?{w:b.x1-b.x0,h:b.y1-b.y0,box:box}:null;
+  }
+  var sb=selScreenBox();
+  return sb?{w:sb.x1-sb.x0,h:sb.y1-sb.y0,box:sb}:null;
+}
+function drawSelSize(){
+  // shown while sizing something: a selection, a fresh drag-out, a scale
+  if(S.tool!=='select'&&!S.newDrag&&!S.scaleDrag) return;
+  var d=selSize();
+  if(!d||(d.w<0.5&&d.h<0.5)) return;
+  var z=S.view.z;
+  ctx.save();
+  measPill(ctx,(d.box.x0+d.box.x1)/2,d.box.y1+15/z,
+           mnum(d.w)+' \u00d7 '+mnum(d.h),z,'#2f6f8f');
   ctx.restore();
 }
 function drawMarquee(){
@@ -1732,7 +1839,7 @@ function renderThumb(cv,l){
   var c=cv.getContext('2d'),w=cv.width,h=cv.height,dpr=window.devicePixelRatio||1;
   c.setTransform(1,0,0,1,0,0);
   c.clearRect(0,0,w,h);
-  c.fillStyle='#fff'; c.fillRect(0,0,w,h);
+  c.fillStyle=sheetBg(); c.fillRect(0,0,w,h);
   var pad=3*dpr, z=Math.min((w-pad*2)/S.W,(h-pad*2)/S.H);
   c.save(); c.translate((w-S.W*z)/2,(h-S.H*z)/2); c.scale(z,z);
   paintSingle(c,l,true,z);
@@ -1748,20 +1855,58 @@ var RESERVED={"abstract":1,"assert":1,"boolean":1,"break":1,"byte":1,"case":1,"c
 "return":1,"short":1,"static":1,"strictfp":1,"super":1,"switch":1,"synchronized":1,"this":1,
 "throw":1,"throws":1,"transient":1,"try":1,"void":1,"volatile":1,"while":1,"true":1,"false":1,"null":1};
 
-function javaName(raw,used){
+function javaIdent(raw){
   var words=String(raw).replace(/[^A-Za-z0-9]+/g,' ').trim().split(/\s+/),id='';
   words.forEach(function(w,i){
     if(!w) return;
     id += i===0 ? w.charAt(0).toLowerCase()+w.slice(1) : w.charAt(0).toUpperCase()+w.slice(1);
   });
+  return id;
+}
+// the Graphics2D variable the emitted code paints through. Everything that writes
+// a paint statement goes through this, so one setting renames the whole output.
+function g2n(){ return S.g2Name||'g2'; }
+// the identifier a name wants, before anything is done about collisions. The
+// prefix keeps generated fields clear of whatever the target class already has;
+// the class name itself asks for the plain form.
+function javaBase(raw,plain){
+  var id=javaIdent(raw);
+  var pfx=plain?'':(S.varPrefix||'');
+  if(pfx) id=pfx+cap(id||'shape');
   if(!id||/^[0-9]/.test(id)) id='shape'+id;
   if(RESERVED[id]) id=id+'Shape';
-  var base=id,n=2;
+  return id;
+}
+function javaName(raw,used,plain){
+  var base=javaBase(raw,plain),id=base,n=2;
   while(used[id]){ id=base+'_'+n; n++; }
   used[id]=1; return id;
 }
+// two names can camel-case down to the same identifier, and the generator then
+// quietly suffixes the loser; the shape list says so rather than let it surprise
+function nameClashes(){
+  var seen={},dup={};
+  S.layers.forEach(function(l){
+    var id=javaBase(l.name);
+    if(seen[id]) dup[id]=1; else seen[id]=1;
+  });
+  return dup;
+}
 function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
-function num(n){ return (Math.round(n*100)/100).toString(); }
+// Every coordinate in the output goes through here. toFixed is what kills the
+// float residue: Math.round(n*100)/100 cannot, because dividing puts it back.
+// Trailing zeros are stripped -- the output has always been terse.
+function roundTo(n,dp){
+  var v=parseFloat(n);
+  if(!isFinite(v)) return '0';
+  dp=Math.max(0,Math.min(6,dp|0));
+  var s=v.toFixed(dp);
+  if(dp>0) s=s.replace(/([.][0-9]*?)0+$/,'$1').replace(/[.]$/,'');
+  return (s===''||s==='-0')?'0':s;
+}
+function num(n){ return roundTo(n,2); }
+// every length or position the drawing is made of; the one the setting moves
+function coord(n){ return roundTo(n,S.precision); }
 function num6(n){ return (Math.round(n*1e6)/1e6).toString(); }
 function colorExpr(hex){ var c=hex2rgb(hex); return 'new Color('+c[0]+', '+c[1]+', '+c[2]+')'; }
 function jstr(s){
@@ -1803,7 +1948,7 @@ function textParts(v,l,asField,frcVar){
   var type=(lines.length===1)?'Shape':'Area';
   function outline(i){
     return 'font'+cap(v)+'.createGlyphVector('+frcVar+', '+jstr(lines[i])+')\n'
-         +'        .getOutline('+num(l.text.x)+'f, '+num(l.text.y+i*l.text.size*1.2)+'f)';
+         +'        .getOutline('+coord(l.text.x)+'f, '+coord(l.text.y+i*l.text.size*1.2)+'f)';
   }
   var body=fontDecl(v,l), i;
   if(asField){
@@ -1821,22 +1966,22 @@ function primitiveExpr(l){
   if(l.kind==='rect'){
     var rx=Math.min(l.g.rx||0,g.w/2), ry=Math.min(l.g.ry||0,g.h/2);
     if(rx>0&&ry>0) return {type:'RoundRectangle2D',
-      ctor:'new RoundRectangle2D.Double('+num(g.x)+', '+num(g.y)+', '+num(g.w)+', '+num(g.h)
-          +', '+num(rx*2)+', '+num(ry*2)+')'};
+      ctor:'new RoundRectangle2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)
+          +', '+coord(rx*2)+', '+coord(ry*2)+')'};
     return {type:'Rectangle2D',
-      ctor:'new Rectangle2D.Double('+num(g.x)+', '+num(g.y)+', '+num(g.w)+', '+num(g.h)+')'};
+      ctor:'new Rectangle2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)+')'};
   }
   if(l.kind==='ellipse') return {type:'Ellipse2D',
-    ctor:'new Ellipse2D.Double('+num(g.x)+', '+num(g.y)+', '+num(g.w)+', '+num(g.h)+')'};
+    ctor:'new Ellipse2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)+')'};
   if(l.kind==='arc') return {type:'Arc2D',
-    ctor:'new Arc2D.Double('+num(g.x)+', '+num(g.y)+', '+num(g.w)+', '+num(g.h)+', '
+    ctor:'new Arc2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)+', '
         +num(l.g.start)+', '+num(l.g.extent)+', Arc2D.'+l.g.arcType+')'};
   return null;
 }
 
 function declParts(v,l,asField,frcVar){
   if(l.kind==='image') return {field:'',build:''};
-  if(l.kind==='text') return textParts(v,l,asField,frcVar||'g2.getFontRenderContext()');
+  if(l.kind==='text') return textParts(v,l,asField,frcVar||g2n()+'.getFontRenderContext()');
   if(l.kind==='path'){
     var cls=l.shapeClass||'GeneralPath';
     if(cls==='Polygon'&&polygonal(l)){
@@ -1856,11 +2001,11 @@ function declParts(v,l,asField,frcVar){
     l.pts.forEach(function(p){
       if(p.cmd==='move'){
         if(open&&l.closed) body+=v+'.closePath();\n';
-        body+=v+'.moveTo('+p.x+', '+p.y+');\n'; open=true;
+        body+=v+'.moveTo('+coord(p.x)+', '+coord(p.y)+');\n'; open=true;
       }
-      else if(p.cmd==='line')  body+=v+'.lineTo('+p.x+', '+p.y+');\n';
-      else if(p.cmd==='quad')  body+=v+'.quadTo('+p.cx+', '+p.cy+', '+p.x+', '+p.y+');\n';
-      else if(p.cmd==='cubic') body+=v+'.curveTo('+p.c1x+', '+p.c1y+', '+p.c2x+', '+p.c2y+', '+p.x+', '+p.y+');\n';
+      else if(p.cmd==='line')  body+=v+'.lineTo('+coord(p.x)+', '+coord(p.y)+');\n';
+      else if(p.cmd==='quad')  body+=v+'.quadTo('+coord(p.cx)+', '+coord(p.cy)+', '+coord(p.x)+', '+coord(p.y)+');\n';
+      else if(p.cmd==='cubic') body+=v+'.curveTo('+coord(p.c1x)+', '+coord(p.c1y)+', '+coord(p.c2x)+', '+coord(p.c2y)+', '+coord(p.x)+', '+coord(p.y)+');\n';
     });
     if(open&&l.closed) body+=v+'.closePath();\n';
     if(asField) return {field:'private final '+cls+' '+v+' = '+ctor+';\n', build:body};
@@ -1887,31 +2032,31 @@ function tfBake(v,l,baseInv){
 function paintStmt(l){
   if(l.paint==='linear'){
     var e=gradEnds(l);
-    return 'g2.setPaint(new GradientPaint('+num(e.x1)+'f, '+num(e.y1)+'f, '+colorExpr(l.fillColor)
-         +', '+num(e.x2)+'f, '+num(e.y2)+'f, '+colorExpr(l.fillColor2)+'));\n';
+    return g2n()+'.setPaint(new GradientPaint('+coord(e.x1)+'f, '+coord(e.y1)+'f, '+colorExpr(l.fillColor)
+         +', '+coord(e.x2)+'f, '+coord(e.y2)+'f, '+colorExpr(l.fillColor2)+'));\n';
   }
   if(l.paint==='radial'){
     var q=gradEnds(l);
-    return 'g2.setPaint(new RadialGradientPaint(new Point2D.Float('+num(q.cx)+'f, '+num(q.cy)+'f), '
-         +num(q.r)+'f,\n        new float[]{0f, 1f},\n        new Color[]{'
+    return g2n()+'.setPaint(new RadialGradientPaint(new Point2D.Float('+coord(q.cx)+'f, '+coord(q.cy)+'f), '
+         +coord(q.r)+'f,\n        new float[]{0f, 1f},\n        new Color[]{'
          +colorExpr(l.fillColor)+', '+colorExpr(l.fillColor2)+'}));\n';
   }
   if(l.paint==='texture'&&l.tex&&l.tex.src&&IMGVARS[l.tex.src]){
-    return 'g2.setPaint(new TexturePaint('+IMGVARS[l.tex.src]+', new Rectangle2D.Double('
-         +num(l.tex.x)+', '+num(l.tex.y)+', '+num(l.tex.w)+', '+num(l.tex.h)+')));\n';
+    return g2n()+'.setPaint(new TexturePaint('+IMGVARS[l.tex.src]+', new Rectangle2D.Double('
+         +coord(l.tex.x)+', '+coord(l.tex.y)+', '+coord(l.tex.w)+', '+coord(l.tex.h)+')));\n';
   }
-  return 'g2.setColor('+colorExpr(l.fillColor)+');\n';
+  return g2n()+'.setColor('+colorExpr(l.fillColor)+');\n';
 }
 
 function strokeStmt(l){
   var w=num(l.strokeW)+'f';
   var d=dashArray(l);
-  if(isStrokeDefault(l)) return 'g2.setStroke(new BasicStroke('+w+'));\n';
+  if(isStrokeDefault(l)) return g2n()+'.setStroke(new BasicStroke('+w+'));\n';
   var capC='BasicStroke.CAP_'+String(l.cap).toUpperCase();
   var joinC='BasicStroke.JOIN_'+String(l.join).toUpperCase();
   var ml=num(Math.max(1,l.miter||10))+'f';
-  if(!d) return 'g2.setStroke(new BasicStroke('+w+', '+capC+', '+joinC+', '+ml+'));\n';
-  return 'g2.setStroke(new BasicStroke('+w+', '+capC+', '+joinC+', '+ml+',\n'
+  if(!d) return g2n()+'.setStroke(new BasicStroke('+w+', '+capC+', '+joinC+', '+ml+'));\n';
+  return g2n()+'.setStroke(new BasicStroke('+w+', '+capC+', '+joinC+', '+ml+',\n'
        +'        new float[]{'+d.map(function(n){ return num(n)+'f'; }).join(', ')+'}, '
        +num(l.dashPhase||0)+'f));\n';
 }
@@ -1919,41 +2064,41 @@ function strokeStmt(l){
 function tfOpen(l,v){
   if(!hasTf(l)) return '';
   var c=centreOf(l), t=l.tf, s='';
-  s+='AffineTransform tx'+cap(v)+' = g2.getTransform();\n';
-  s+='g2.translate('+num(c.x)+', '+num(c.y)+');\n';
-  if(t.rot) s+='g2.rotate(Math.toRadians('+num(t.rot)+'));\n';
-  if(t.sx!==1||t.sy!==1) s+='g2.scale('+num(t.sx)+', '+num(t.sy)+');\n';
-  if(t.shx||t.shy) s+='g2.shear('+num(t.shx)+', '+num(t.shy)+');\n';
-  s+='g2.translate('+num(-c.x)+', '+num(-c.y)+');\n';
+  s+='AffineTransform tx'+cap(v)+' = '+g2n()+'.getTransform();\n';
+  s+=g2n()+'.translate('+coord(c.x)+', '+coord(c.y)+');\n';
+  if(t.rot) s+=g2n()+'.rotate(Math.toRadians('+num(t.rot)+'));\n';
+  if(t.sx!==1||t.sy!==1) s+=g2n()+'.scale('+num(t.sx)+', '+num(t.sy)+');\n';
+  if(t.shx||t.shy) s+=g2n()+'.shear('+num(t.shx)+', '+num(t.shy)+');\n';
+  s+=g2n()+'.translate('+coord(-c.x)+', '+coord(-c.y)+');\n';
   return s;
 }
-function tfClose(l,v){ return hasTf(l)?('g2.setTransform(tx'+cap(v)+');\n'):''; }
+function tfClose(l,v){ return hasTf(l)?(g2n()+'.setTransform(tx'+cap(v)+');\n'):''; }
 function alphaOpen(l,v){
   if(l.alpha===undefined||l.alpha>=1) return '';
-  return 'Composite comp'+cap(v)+' = g2.getComposite();\n'
-       + 'g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, '+num(l.alpha)+'f));\n';
+  return 'Composite comp'+cap(v)+' = '+g2n()+'.getComposite();\n'
+       + g2n()+'.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, '+num(l.alpha)+'f));\n';
 }
 function alphaClose(l,v){
-  return (l.alpha===undefined||l.alpha>=1)?'':('g2.setComposite(comp'+cap(v)+');\n');
+  return (l.alpha===undefined||l.alpha>=1)?'':(g2n()+'.setComposite(comp'+cap(v)+');\n');
 }
 
 function textBlock(l,v){
   var out=fontDecl(v,l);
-  out+='g2.setFont(font'+cap(v)+');\n';
+  out+=g2n()+'.setFont(font'+cap(v)+');\n';
   var lines=String(l.text.s||'').split('\n');
   lines.forEach(function(line,i){
     var yy=Math.round(l.text.y+i*l.text.size*1.2);
     if(l.render==='fill'||l.render==='both'){
       out+=paintStmt(l);
-      out+='g2.drawString('+jstr(line)+', '+num(l.text.x)+', '+yy+');\n';
+      out+=g2n()+'.drawString('+jstr(line)+', '+coord(l.text.x)+', '+yy+');\n';
     }
     if(l.render==='draw'||l.render==='both'){
       out+='Shape outline'+cap(v)+(i?String(i+1):'')+' = font'+cap(v)
-         +'.createGlyphVector(g2.getFontRenderContext(), '+jstr(line)+')\n'
-         +'        .getOutline('+num(l.text.x)+'f, '+yy+'f);\n';
-      out+='g2.setColor('+colorExpr(l.strokeColor)+');\n';
+         +'.createGlyphVector('+g2n()+'.getFontRenderContext(), '+jstr(line)+')\n'
+         +'        .getOutline('+coord(l.text.x)+'f, '+yy+'f);\n';
+      out+=g2n()+'.setColor('+colorExpr(l.strokeColor)+');\n';
       out+=strokeStmt(l);
-      out+='g2.draw(outline'+cap(v)+(i?String(i+1):'')+');\n';
+      out+=g2n()+'.draw(outline'+cap(v)+(i?String(i+1):'')+');\n';
     }
   });
   return out;
@@ -1974,8 +2119,9 @@ function buildOnceOn(){
 // Produces three streams. In "build once" mode the shapes become fields built a
 // single time; otherwise everything lands in the paint stream exactly as before.
 function genParts(split){
-  var used={}, F='', B='', P='', first=true, clipOpen=false;
-  var frc=split?'FRC':'g2.getFontRenderContext()';
+  var used={}, F='', B='', P='', first=true;
+  var SC=clipScopes(), clipStack=[];   // saved-clip names, innermost last
+  var frc=split?'FRC':g2n()+'.getFontRenderContext()';
   var imgs=collectImages(used);
   USED_IMAGES=imgs.length>0;
   USED_FRC=false;
@@ -2009,15 +2155,40 @@ function genParts(split){
     var base=grp[0];
     var drawable=grp.filter(drawableIn);
     if(!drawable.length) return;
+    // An empty member is dropped above because add, subtract and exclusiveOr all
+    // leave the running Area alone -- but intersect does not, it empties it, and
+    // quietly dropping the member would have the code draw a shape the sheet does
+    // not. Java would arrive at nothing here, so the output says nothing too.
+    var emptied=grp.some(function(l,i){
+      return i>0&&!drawableIn(l)&&l.combine==='intersect';
+    });
+    if(emptied){
+      if(!first) P+='\n';
+      first=false;
+      P+='// '+base.name+': an empty shape is intersected into this run, so the Area\n'
+        +'// comes out empty and there is nothing to paint\n';
+      return;
+    }
     if(!first) P+='\n';
     first=false;
 
+    // leaving a clip's run restores whatever clip was active before it
+    var bi=S.layers.indexOf(base), bd=(bi>=0&&SC[bi])?SC[bi].length:0;
+    var closed=0;
+    while(clipStack.length>bd){ P+=g2n()+'.setClip('+clipStack.pop()+');\n'; closed++; }
+    if(closed) P+='\n';           // let the restored scope breathe
+
     if(base.isClip&&grp.length===1){
+      if(!clipOwns(bi)) return;    // nothing is nested under it, so emit nothing
       var cv=javaName(base.name,used);
       P+='// clip region: '+base.name+'\n';
       put(declParts(cv,base,split,frc));
-      if(!clipOpen){ P+='Shape savedClip = g2.getClip();\n'; clipOpen=true; }
-      P+='g2.setClip('+cv+');\n';
+      var sv='savedClip'+(clipStack.length?String(clipStack.length+1):'');
+      P+='Shape '+sv+' = '+g2n()+'.getClip();\n';
+      // clip() intersects with what is already active so nested regions compose;
+      // setClip() would throw the outer region away
+      P+=g2n()+'.clip('+cv+');\n';
+      clipStack.push(sv);
       return;
     }
 
@@ -2030,14 +2201,14 @@ function genParts(split){
       if(l.kind==='text') P+=textBlock(l,v);
       else if(l.kind==='image'){
         var gi=norm(l.g);
-        P+='g2.drawImage('+IMGVARS[l.img.src]+', '+num(gi.x)+', '+num(gi.y)+', '
-          +num(gi.w)+', '+num(gi.h)+', null);\n';
+        P+=g2n()+'.drawImage('+IMGVARS[l.img.src]+', '+coord(gi.x)+', '+coord(gi.y)+', '
+          +coord(gi.w)+', '+coord(gi.h)+', null);\n';
       } else {
-        if(l.render==='fill'||l.render==='both'){ P+=paintStmt(l); P+='g2.fill('+v+');\n'; }
+        if(l.render==='fill'||l.render==='both'){ P+=paintStmt(l); P+=g2n()+'.fill('+v+');\n'; }
         if(l.render==='draw'||l.render==='both'){
-          P+='g2.setColor('+colorExpr(l.strokeColor)+');\n';
+          P+=g2n()+'.setColor('+colorExpr(l.strokeColor)+');\n';
           P+=strokeStmt(l);
-          P+='g2.draw('+v+');\n';
+          P+=g2n()+'.draw('+v+');\n';
         }
       }
       P+=tfClose(l,v);
@@ -2069,17 +2240,18 @@ function genParts(split){
 
     P+=alphaOpen(base,av);
     P+=tfOpen(base,av);
-    if(base.render==='fill'||base.render==='both'){ P+=paintStmt(base); P+='g2.fill('+av+');\n'; }
+    if(base.render==='fill'||base.render==='both'){ P+=paintStmt(base); P+=g2n()+'.fill('+av+');\n'; }
     if(base.render==='draw'||base.render==='both'){
-      P+='g2.setColor('+colorExpr(base.strokeColor)+');\n';
+      P+=g2n()+'.setColor('+colorExpr(base.strokeColor)+');\n';
       P+=strokeStmt(base);
-      P+='g2.draw('+av+');\n';
+      P+=g2n()+'.draw('+av+');\n';
     }
     P+=tfClose(base,av);
     P+=alphaClose(base,av);
   });
 
-  if(clipOpen) P+='\ng2.setClip(savedClip);\n';
+  if(clipStack.length) P+='\n';
+  while(clipStack.length) P+=g2n()+'.setClip('+clipStack.pop()+');\n';
   if(split&&USED_FRC)
     F='private static final FontRenderContext FRC = new FontRenderContext(null, true, true);\n'+F;
   return {fields:F,build:B,paint:P};
@@ -2088,9 +2260,11 @@ function genParts(split){
 function generate(){
   var split=buildOnceOn();
   var g=genParts(split);
-  if(!split) return g.paint;
   if(!g.paint.trim()) return '';
-  var out='';
+  var setup=bgSetup();
+  var head=setup?'// ---- panel: call this in your constructor ----\n'+setup+'\n':'';
+  if(!split) return head+g.paint;
+  var out=head;
   if(g.fields.trim()) out+='// ---- fields: declare these in your class ----\n'+g.fields+'\n';
   if(g.build.trim()) out+='// ---- build once: call this from your constructor ----\n'+g.build+'\n';
   out+='// ---- paintComponent ----\n'+g.paint;
@@ -2100,7 +2274,7 @@ function generate(){
 function indent(t,p){ return t.split('\n').map(function(l){ return l.trim()===''?'':p+l; }).join('\n'); }
 
 function classNameOf(){
-  var id=javaName(document.getElementById('className').value||'ShapePanel',{});
+  var id=javaName(document.getElementById('className').value||'ShapePanel',{},true);
   return cap(id);
 }
 
@@ -2111,8 +2285,11 @@ function classImports(){
                     +'import java.io.File;\nimport java.io.IOException;\n';
   return s;
 }
+function bgSetup(){
+  return S.bgSet?('setBackground('+colorExpr(S.bg)+');\n'):'';
+}
 function hintsBlock(){
-  return S.aa?'        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n'
+  return S.aa?'        '+g2n()+'.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n'
              +'                            RenderingHints.VALUE_ANTIALIAS_ON);\n':'';
 }
 function mainBlock(cn){
@@ -2138,6 +2315,7 @@ function fullClassOnce(){
   +(g.fields.trim()?indent(g.fields.replace(/\n+$/,''),'    ')+'\n\n':'')
   +'    public '+cn+'() {\n'
   +'        setPreferredSize(new Dimension('+S.W+', '+S.H+'));\n'
+  +(S.bgSet?'        '+bgSetup():'')
   +(hasBuild?'        buildShapes();\n':'')
   +'    }\n\n'
   +(hasBuild?('    private void buildShapes() {\n'
@@ -2146,7 +2324,7 @@ function fullClassOnce(){
   +'    @Override\n'
   +'    protected void paintComponent(Graphics g) {\n'
   +'        super.paintComponent(g);\n'
-  +'        Graphics2D g2 = (Graphics2D) g;\n'
+  +'        Graphics2D '+g2n()+' = (Graphics2D) g;\n'
   +hintsBlock()
   +'\n'+indent(g.paint.replace(/\n+$/,''),'        ')+'\n'
   +'    }\n\n'
@@ -2161,10 +2339,11 @@ function fullClass(){
   var cn=classNameOf();
   return classImports()+'\n'
   +'public class '+cn+' extends JPanel {\n\n'
+  +(S.bgSet?('    public '+cn+'() {\n        '+bgSetup()+'    }\n\n'):'')
   +'    @Override\n'
   +'    protected void paintComponent(Graphics g) {\n'
   +'        super.paintComponent(g);\n'
-  +'        Graphics2D g2 = (Graphics2D) g;\n'
+  +'        Graphics2D '+g2n()+' = (Graphics2D) g;\n'
   +hintsBlock()
   +'\n'+indent(body.replace(/\n+$/,''),'        ')+'\n'
   +'    }\n\n'
@@ -2182,12 +2361,22 @@ function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 
 function emitCode(){
   var el=document.getElementById('code'), txt=outputText();
-  if(!txt.trim()){
-    el.innerHTML='<span class="cm">// Pick a tool and draw on the sheet.</span>';
-    return '';
-  }
+  var blank=document.getElementById('blank'), empty=!txt.trim();
+  // an empty sheet shows the title block instead of a lone comment line
+  if(blank){ blank.hidden=!empty; if(empty) fillBlank(); }
+  el.hidden=empty;
+  if(empty){ el.innerHTML=''; return ''; }
   el.innerHTML=highlight(txt);
   return txt;
+}
+
+// keep the title block's fields honest — they mirror live state
+function fillBlank(){
+  var set=function(id,v){ var n=document.getElementById(id); if(n) n.textContent=v; };
+  set('tbSize',S.W+' × '+S.H);
+  set('tbGrid',S.snap?S.grid+' px, snapping':S.grid+' px');
+  set('tbTool',(RAIL.filter(function(r){return r.id===S.tool;})[0]||{}).label||S.tool);
+  set('tbOut',S.out==='full'?'full class':'fragment');
 }
 
 // strings and comments are lifted out first: "class" is itself a keyword, so a
@@ -2234,6 +2423,8 @@ var ICON={
   ellipse:'<ellipse cx="12" cy="12" rx="8.5" ry="6.5"/>',
   arc:'<path d="M12 12L12 3.5A8.5 8.5 0 0120.5 12z"/><path d="M3.5 12a8.5 8.5 0 008.5 8.5"/>',
   text:'<path d="M5 6V4.5h14V6M12 4.5v15M9 19.5h6"/>',
+  measure:'<path d="M4.5 19.5L19.5 4.5"/><path d="M2.5 17.5l4 4M17.5 2.5l4 4"/>'
+         +'<path d="M8.5 12.5l2 2M12 9l2 2"/>',
   pan:'<path d="M9 11V5.5a1.5 1.5 0 013 0V11m0-1.5a1.5 1.5 0 013 0V13m0-2a1.5 1.5 0 013 0v5a5 5 0 01-5 5h-2.5a5 5 0 01-4-2L6 15.5a1.5 1.5 0 012.2-2L9.5 15"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5-5-6 6"/>',
   zin:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 8v5M8 10.5h5"/>',
@@ -2262,6 +2453,7 @@ var RAIL=[
   {id:'arc',type:'tool',icon:'arc',label:'Arc2D (drag out)',key:'A'},
   {id:'text',type:'tool',icon:'text',label:'drawString text',key:'T'},
   {sep:true},
+  {id:'measure',type:'tool',icon:'measure',label:'Ruler: measure distances and angles',key:'L'},
   {id:'pan',type:'tool',icon:'pan',label:'Pan the canvas',key:'H'},
   {id:'image',type:'tool',icon:'image',label:'Trace image (click to load one)',key:'I'},
   {id:'zin',type:'act',icon:'zin',label:'Zoom in',key:'+'},
@@ -2278,7 +2470,7 @@ var RAIL=[
 ];
 var SHAPE_TOOLS={rect:1,ellipse:1,arc:1};
 var HINTS={
-  select:'Drag handles to reshape. Double-click a segment to insert a point. Ctrl+click to multi-select.',
+  select:'Drag handles to reshape. Double-click a segment to insert a point. Ctrl+click to multi-select; hold Ctrl for the scale grips.',
   line:'Click to add a straight segment',
   quad:'Click to add a curve, then drag its control square',
   cubic:'Click to add a curve, then drag its two control squares',
@@ -2287,7 +2479,8 @@ var HINTS={
   arc:'Drag out an arc, then set start and extent angles',
   text:'Click where the text baseline should start',
   pan:'Drag to move the canvas',
-  image:'Drag the photo to position it, scroll to resize'
+  image:'Drag the photo to position it, scroll to resize',
+  measure:'Click two points to measure. Ends land on endpoints, midpoints, centres and crossings'
 };
 
 /* the tool description lives bottom-left, and follows whatever you hover */
@@ -2345,7 +2538,8 @@ function setTool(t){
   syncRail();
   board.style.cursor = t==='pan'?'grab' : t==='image'?'move'
                      : t==='select'?'default' : 'crosshair';
-  toolStatus();
+  if(t==='measure'){ showTab('ruler'); syncMeasures(); measStatus(); }
+  else { S.measDraft=null; S.measHover=null; S.measGapFrom=-1; toolStatus(); }
   draw();
 }
 function syncRail(){
@@ -2382,6 +2576,7 @@ document.getElementById('tabs').addEventListener('click',function(e){
 var EYE_ON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 var EYE_OFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 20C5 20 1 12 1 12a19 19 0 0 1 5.2-6M9.9 4.2A10.9 10.9 0 0 1 12 4c7 0 11 8 11 8a19 19 0 0 1-2.2 3.2M1 1l22 22"/></svg>';
 var OPLABEL={add:'∪ add',subtract:'− subtract',intersect:'∩ intersect',exclusiveOr:'⊕ xor'};
+var OPGLYPH={add:'∪',subtract:'−',intersect:'∩',exclusiveOr:'⊕'};
 var KINDLABEL={path:'GeneralPath',rect:'Rectangle2D',ellipse:'Ellipse2D',arc:'Arc2D',
                text:'drawString',image:'drawImage'};
 // a path layer is labelled by whatever Java class it will actually emit
@@ -2397,6 +2592,14 @@ function mergedLayers(){
   return set;
 }
 
+// isolate one shape so it can be read whole without dimming the rest. Stateless
+// on purpose: "this is the only visible one" is the entire toggle condition, so
+// it survives undo, deletion and reordering without a saved snapshot to go stale
+function soloLayer(i){
+  var alone=S.layers.every(function(l,j){ return j===i ? l.visible : !l.visible; });
+  S.layers.forEach(function(l,j){ l.visible = alone ? true : j===i; });
+  toast(alone?'All shapes shown':'Isolated '+S.layers[i].name);
+}
 function renderLayers(){
   var box=document.getElementById('stack');
   var dl=document.getElementById('dropline');
@@ -2404,18 +2607,73 @@ function renderLayers(){
   if(dl) box.appendChild(dl);
   var dpr=window.devicePixelRatio||1;
   var merged=mergedLayers();
+  var clash=nameClashes();
+  var scopes=clipScopes();
+  var folded=collapsedRows();
   for(var i=S.layers.length-1;i>=0;i--){
+    if(folded[i]) continue;               // hidden inside a collapsed base
     (function(idx){
       var lyr=S.layers[idx];
       var isMerged=(merged.indexOf(lyr)>=0)||
         (!lyr.visible&&idx>0&&lyr.combine!=='none'&&!lyr.isClip&&lyr.kind!=='image');
+      var dupName=!!clash[javaBase(lyr.name)];
       var row=document.createElement('div');
+      var depth=(scopes[idx]||[]).length;
+      // a boolean member is not itself flagged `clipped`, so its own scope reads 0.
+      // It is painted as part of its base's Area, so it indents from the base's depth
+      var runAt=idx;
+      if(isMerged){ while(runAt>0&&merged.indexOf(S.layers[runAt])>=0) runAt--; }
+      var runDepth=(scopes[runAt]||[]).length;
+      var nest=depth>0||isMerged;                 // is this row a child of the one below
+      // a base is what the markers above point down at: a clip region with shapes
+      // under it, or the first shape of a boolean run
+      var runBase=(lyr.isClip&&clipOwns(idx)>0)
+               || (!isMerged&&idx+1<S.layers.length&&merged.indexOf(S.layers[idx+1])>=0);
       row.className='layer'
         +(idx===S.active?' on':(S.selLayers.indexOf(idx)>=0?' sel':''))
-        +(lyr.visible?'':' hidden-l')+(isMerged?' merged':'')
-        +(lyr.group?' grouped':'');
+        +(lyr.visible?'':' hidden-l')
+        +(lyr.group?' grouped':'')+(dupName?' clash':'')
+        +(lyr.isClip&&clipOwns(idx)?' clipowner':'')
+        +(nest?' nested':'')+(runBase?' runbase':'');
+      // every row carries its level: the child's spine and the base's elbow are
+      // positioned from it, so they land on the same vertical line
+      row.style.setProperty('--nestlevel',runDepth+(isMerged?1:0));
       row.dataset.idx=idx;
       if(lyr.group) row.style.setProperty('--gband',groupColor(lyr.group));
+      // one marker serves both relationships, told apart by glyph and colour:
+      // a crimson arrow means "clipped by the region below", an operator glyph
+      // means "merged into the shape below with this set operation"
+      if(nest){
+        var mk=document.createElement('span');
+        mk.className='nestmark '+(depth?'nest-clip':'nest-bool');
+        var glyph=document.createElement('i');   // sits on the spine, masking it
+        if(depth){
+          glyph.innerHTML='<svg viewBox="0 0 12 14" fill="none" stroke="currentColor" '
+            +'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+            +'<path d="M7 2v7.5"/><path d="M4 6.5 7 10l3-3.5"/></svg>';
+          mk.title='Clipped to '+S.layers[scopes[idx][depth-1]].name;
+        } else {
+          glyph.textContent=OPGLYPH[lyr.combine]||'∪';
+          mk.title=(OPLABEL[lyr.combine]||'combined')+' with the shape below';
+        }
+        mk.appendChild(glyph);
+        row.appendChild(mk);
+      }
+      if(runBase){
+        var el=document.createElement('span');   // the elbow the spine lands on
+        el.className='nestbase '+(lyr.isClip?'nest-clip':'nest-bool');
+        row.appendChild(el);
+        var tw=document.createElement('button');
+        tw.className='twisty'+(lyr.collapsed?' shut':'');
+        tw.innerHTML='<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" '
+          +'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+          +'<path d="M3 4.5 6 8l3-3.5"/></svg>';
+        tw.title=(lyr.collapsed?'Show':'Hide')+' the '+foldCount(idx)+' shape'
+                 +(foldCount(idx)===1?'':'s')+' under this one';
+        tw.onpointerdown=function(e){ e.stopPropagation(); };
+        tw.onclick=function(e){ e.stopPropagation(); lyr.collapsed=!lyr.collapsed; renderLayers(); };
+        row.appendChild(tw);
+      }
       var cv=document.createElement('canvas');
       cv.className='thumb';
       cv.width=Math.round(46*dpr); cv.height=Math.round(36*dpr);
@@ -2424,7 +2682,9 @@ function renderLayers(){
       var body=document.createElement('div'); body.className='lbody';
       var nm=document.createElement('input');
       nm.className='lname'; nm.value=lyr.name;
-      nm.title='Rename: this becomes the Java variable';
+      nm.title=dupName
+        ? 'Another shape makes the same Java name, so the output will suffix one of them. Rename to fix it.'
+        : 'Rename: this becomes the Java variable '+javaBase(lyr.name);
       nm.onpointerdown=function(e){ e.stopPropagation(); };
       nm.onclick=function(e){ e.stopPropagation(); };
       nm.onchange=function(){ push(); lyr.name=nm.value.trim()||'shape'; sync(); };
@@ -2434,13 +2694,53 @@ function renderLayers(){
       var kind=kindLabel(lyr);
       var extra = lyr.isClip ? 'clip' : isMerged ? OPLABEL[lyr.combine] : lyr.render;
       meta.textContent=kind+' · '+extra+(lyr.group?' · grp':'');
+      if(lyr.isClip){
+        var owns=clipOwns(idx);
+        meta.textContent+=owns?(' · masks '+owns+' above')
+                              :' · not drawn, masks nothing';
+      }
+      else if(depth) meta.textContent+=' · clipped';
+      if(lyr.isClip&&clipOwns(idx)){
+        var tag=document.createElement('span');   // sits at the row edge, clear of the name
+        tag.className='masktag'; tag.textContent='MASK';
+        row.appendChild(tag);
+      }
+      // the base of a boolean run decides render mode, colour, stroke and alpha for
+      // the whole merged Area; members contribute geometry only. Say how many it
+      // speaks for, and speak up when its mode is quietly discarding theirs
+      if(runBase&&!lyr.isClip){
+        var mem=[];
+        for(var mi=idx+1;mi<S.layers.length&&merged.indexOf(S.layers[mi])>=0;mi++) mem.push(S.layers[mi]);
+        if(mem.length) meta.textContent+=' · '+mem.length+' merged';
+        var swallowed=(lyr.render==='draw')&&mem.some(function(o){
+          return o.render==='fill'||o.render==='both';
+        });
+        if(swallowed){
+          // leads the meta line: in a narrow panel the tail is ellipsised away, and a
+          // warning nobody can read is no warning
+          var wsp=document.createElement('span');
+          wsp.className='warn'; wsp.textContent='outline only · ';
+          wsp.title='This run paints as an outline because the mode here is "draw", and the '
+            +'base sets the mode for the whole merged shape. '
+            +(mem.length===1?'1 shape below is filled, but its mode is ignored. '
+                            :mem.length+' shapes below are filled, but their modes are ignored. ')
+            +'Set this shape to fill to get a solid result.';
+          meta.insertBefore(wsp,meta.firstChild);
+        }
+      }
+      if(lyr.collapsed&&foldCount(idx)) meta.textContent+=' · '+foldCount(idx)+' folded';
+      if(dupName) meta.textContent+=' · name clash';
       body.appendChild(nm); body.appendChild(meta);
       var eye=document.createElement('button');
       eye.className='eye'; eye.innerHTML=lyr.visible?EYE_ON:EYE_OFF;
-      eye.title=lyr.visible?'Hide':'Show';
+      eye.title=(lyr.visible?'Hide':'Show')+' · Alt-click to isolate';
       eye.setAttribute('aria-label',eye.title);
       eye.onpointerdown=function(e){ e.stopPropagation(); };
-      eye.onclick=function(e){ e.stopPropagation(); push(); lyr.visible=!lyr.visible; sync(); };
+      eye.onclick=function(e){
+        e.stopPropagation(); push();
+        if(e.altKey) soloLayer(idx); else lyr.visible=!lyr.visible;
+        sync();
+      };
       row.appendChild(cv); row.appendChild(body); row.appendChild(eye);
       row.addEventListener('pointerdown',function(e){ rowDown(e,idx,row); });
       box.appendChild(row);
@@ -2509,7 +2809,13 @@ function rowUp(){
   }
   if(rd.slot===null) return;
   var idxs=(S.selLayers.indexOf(rd.idx)>=0)?S.selLayers.slice():expandSel([rd.idx]);
-  var target=S.layers.length-rd.slot;
+  // read the insertion point off the rows themselves. Folding means the list can
+  // show fewer rows than there are layers, so length arithmetic no longer maps
+  var drows=[].slice.call(document.getElementById('stack').querySelectorAll('.layer'));
+  var target;
+  if(!drows.length) target=S.layers.length;
+  else if(rd.slot<drows.length) target=(+drows[rd.slot].dataset.idx)+1;  // in front of that row
+  else target=+drows[drows.length-1].dataset.idx;                        // behind the last one
   push(); moveLayers(idxs,target); S.sel=null; sync();
 }
 
@@ -2605,7 +2911,7 @@ function syncProps(){
   document.getElementById('tfNote').innerHTML = roundArc
     ? 'This arc is circular, so rotating it only moves <code>start°</code>, so the output stays a plain '
       +'<code>Arc2D.Double</code> with no transform. Drag the round handles on the sheet to reshape it.'
-    : 'Applied about the shape&rsquo;s centre, then undone with <code>g2.setTransform</code>. '
+    : 'Applied about the shape&rsquo;s centre, then undone with <code>'+g2n()+'.setTransform</code>. '
       +'Selection handles follow the transform.';
   document.getElementById('trot').value=l.tf.rot;
   document.getElementById('tsx').value=l.tf.sx;
@@ -2658,23 +2964,37 @@ function syncProps(){
   cb.value=l.combine;
   cb.disabled=(S.active===0||l.isClip||l.kind==='image');
   document.getElementById('isClip').checked=l.isClip;
+  var ci=S.layers.indexOf(l), above=false;
+  for(var ck=ci-1;ck>=0;ck--){ if(S.layers[ck].isClip){ above=true; break; } if(!S.layers[ck].clipped) break; }
+  var cbox=document.getElementById('clippedChk');
+  cbox.checked=!!l.clipped; cbox.disabled=!above;
+  document.getElementById('clipNote').textContent = l.isClip
+    ? ('A clip shape is not drawn itself. It confines the shapes nested under it — tick "Clip to region above" on those. It currently clips '+clipOwns(ci)+'.')
+    : above ? 'Nest this under the clip region above it. Nested clips intersect rather than replace.'
+            : 'No clip region above this shape, so there is nothing to nest it under.';
   document.getElementById('isClip').disabled=(l.kind==='text'||l.kind==='image');
 }
 
-function sync(){ normSel(); renderLayers(); syncProps(); syncRail(); emitCode(); draw(); scheduleSave(); }
+function sync(){ normSel(); renderLayers(); syncProps(); syncRail(); syncMeasures(); emitCode(); draw(); scheduleSave(); }
 
 /* ================= editing ================= */
 
+// += on a fractional coordinate grows float residue every time it runs
+// (254.46 + 25 lands on 279.46000000000004), and a nudged shape gets nudged
+// again. Six places is far past anything the sheet can express, so trimming
+// back to it after every move loses nothing real and keeps the drift out.
+function trim6(v){ return Math.round(v*1e6)/1e6; }
 function shiftLayer(l,dx,dy){
   if(!dx&&!dy) return;
   if(l.kind==='path'){
     l.pts.forEach(function(p){
-      p.x+=dx; p.y+=dy;
-      if(p.cmd==='quad'){ p.cx+=dx; p.cy+=dy; }
-      if(p.cmd==='cubic'){ p.c1x+=dx; p.c1y+=dy; p.c2x+=dx; p.c2y+=dy; }
+      p.x=trim6(p.x+dx); p.y=trim6(p.y+dy);
+      if(p.cmd==='quad'){ p.cx=trim6(p.cx+dx); p.cy=trim6(p.cy+dy); }
+      if(p.cmd==='cubic'){ p.c1x=trim6(p.c1x+dx); p.c1y=trim6(p.c1y+dy);
+                           p.c2x=trim6(p.c2x+dx); p.c2y=trim6(p.c2y+dy); }
     });
-  } else if(l.kind==='text'){ l.text.x+=dx; l.text.y+=dy; }
-  else { l.g.x+=dx; l.g.y+=dy; }
+  } else if(l.kind==='text'){ l.text.x=trim6(l.text.x+dx); l.text.y=trim6(l.text.y+dy); }
+  else { l.g.x=trim6(l.g.x+dx); l.g.y=trim6(l.g.y+dy); }
 }
 function shiftSelection(dx,dy){
   S.selLayers.forEach(function(i){ if(S.layers[i]) shiftLayer(S.layers[i],dx,dy); });
@@ -2797,9 +3117,11 @@ board.addEventListener('pointermove',function(e){
 
   S.fine=fineOn(e);
   S.constrain=!!e.shiftKey;
+  setScaleMod(e.ctrlKey||e.metaKey);
   if(e.buttons===0&&(S.drag||S.moveDrag||S.panDrag||S.imgDrag||S.newDrag||S.rotDrag
      ||S.scaleDrag||S.marquee)) clearDrags();
 
+  if(S.tool==='measure'){ measMove(s); return; }
   if(S.marquee){ S.marquee.x1=s.x; S.marquee.y1=s.y; draw(); return; }
 
   if(S.rotDrag){
@@ -2942,9 +3264,13 @@ board.addEventListener('pointerdown',function(e){
   if(e.button!==0) return;
   hideCtx();
   S.fine=fineOn(e);
+  // the key may have gone down before the window had focus, so the press was
+  // never seen; read it off the event rather than trust the tracked flag
+  setScaleMod(e.ctrlKey||e.metaKey);
   var s=toSheet(e);
   capture(e);
 
+  if(S.tool==='measure'){ measDown(s,e); return; }
   if(S.tool==='pan'){
     S.panDrag={x:e.clientX-S.view.x,y:e.clientY-S.view.y};
     board.style.cursor='grabbing'; return;
@@ -3180,6 +3506,7 @@ document.addEventListener('pointerdown',function(e){
 });
 
 board.addEventListener('pointerup',function(e){
+  if(S.tool==='measure'){ measUp(); try{ board.releasePointerCapture(e.pointerId); }catch(err){} return; }
   if(S.marquee){
     var m=S.marquee; S.marquee=null;
     var x0=Math.min(m.x0,m.x1), x1=Math.max(m.x0,m.x1);
@@ -3317,6 +3644,20 @@ document.getElementById('shapeClass').onchange=function(){
   sync();
 };
 document.getElementById('combine').onchange=function(){ push(); L().combine=this.value; sync(); };
+// one control for the whole panel: fold everything, or unfold it if it already is
+document.getElementById('foldAll').onclick=function(){
+  var bases=[];
+  S.layers.forEach(function(l,i){ if(foldCount(i)>0) bases.push(l); });
+  if(!bases.length){ toast('Nothing to fold'); return; }
+  var anyOpen=bases.some(function(l){ return !l.collapsed; });
+  bases.forEach(function(l){ l.collapsed=anyOpen; });
+  renderLayers();
+  toast(anyOpen?'Folded '+bases.length+' run'+(bases.length===1?'':'s'):'Unfolded');
+};
+document.getElementById('clippedChk').onchange=function(){
+  var l=L(); if(!l) return;
+  push(); l.clipped=this.checked; sync();
+};
 document.getElementById('isClip').onchange=function(){
   push(); L().isClip=this.checked;
   if(this.checked) L().combine='none';
@@ -3434,7 +3775,7 @@ function syncScaleUI(){
   document.getElementById('scEach').disabled=S.selLayers.length<2;
   document.getElementById('scaleNote').innerHTML =
     (S.scaleMode==='tf'
-      ? 'Rides the layer transform, so the output wraps the shape in <code>g2.scale(&hellip;)</code> '
+      ? 'Rides the layer transform, so the output wraps the shape in <code>'+g2n()+'.scale(&hellip;)</code> '
         +'about its own centre and the line width grows with it. The coordinates stay as they are.'
       : 'Rewrites the coordinates, so the emitted Java needs no <code>AffineTransform</code>. '
         +'Switching back to it folds any scale already on the transform into the numbers, '
@@ -3519,7 +3860,68 @@ function syncGridUI(){
   document.getElementById('gridOp').value=Math.round(S.gridOpacity*100);
   document.getElementById('gridOpVal').textContent=Math.round(S.gridOpacity*100)+'%';
   document.getElementById('gs').value=S.grid;
+  document.getElementById('solidChk').checked=!!S.solidView;
 }
+/* ---- panel background & field prefix ---- */
+
+function syncPrecisionUI(){
+  document.getElementById('precision').value=S.precision;
+  document.getElementById('precWhole').disabled=(S.precision===0);
+  var sample=roundTo(404.46000000000004,S.precision);
+  document.getElementById('precNote').innerHTML=
+    'Every coordinate and size in the Java is rounded to this many places, so a point that '
+    +'lands on <code>404.46000000000004</code> is written <code>'+sample+'</code>. '
+    +(S.precision===0
+        ? 'Whole pixels read cleanest, but a curve that was placed between them moves.'
+        : 'Java draws in floating point either way &mdash; this only changes what the '
+          +'source says. Shapes cut in the set lab are laid down at this precision too. '
+          +'Alpha, dash lengths and scale factors keep their own precision, since rounding '
+          +'those would change the drawing rather than tidy it.');
+}
+function syncSheetUI(){
+  document.getElementById('bgCol').value=S.bg;
+  document.getElementById('bgCol').disabled=!S.bgSet;
+  document.getElementById('bgWhite').disabled=!S.bgSet;
+  document.getElementById('bgSet').checked=S.bgSet;
+  document.getElementById('varPrefix').value=S.varPrefix;
+  document.getElementById('g2Name').value=S.g2Name||'g2';
+  document.getElementById('bgNote').innerHTML = S.bgSet
+    ? 'The sheet is painted with this colour and the class calls '
+      +'<code>setBackground(&hellip;)</code>, so the output matches what you see.'
+    : 'Nothing is emitted, so the panel keeps the look-and-feel&rsquo;s own colour. The sheet '
+      +'shows Metal&rsquo;s <code>#EEEEEE</code>; the real shade depends on the platform. '
+      +'A default <code>JPanel</code> is never white.';
+}
+document.getElementById('bgCol').oninput=function(){
+  S.bg=this.value; emitCode(); draw(); renderLayers(); scheduleSave();
+};
+document.getElementById('bgWhite').onclick=function(){
+  S.bg='#ffffff'; syncSheetUI(); emitCode(); draw(); renderLayers(); scheduleSave();
+};
+document.getElementById('bgSet').onchange=function(){
+  S.bgSet=this.checked; syncSheetUI(); emitCode(); draw(); renderLayers(); scheduleSave();
+};
+// typing stays untouched; the field snaps to the identifier it will really become
+document.getElementById('varPrefix').addEventListener('input',function(){
+  S.varPrefix=javaIdent(this.value);
+  emitCode(); renderLayers(); scheduleSave();
+});
+document.getElementById('varPrefix').addEventListener('change',function(){
+  this.value=S.varPrefix;
+});
+// typing stays untouched; the field snaps to the identifier that will really be
+// emitted. Blank falls back to g2 rather than producing nameless paint calls.
+document.getElementById('g2Name').addEventListener('input',function(){
+  var id=javaIdent(this.value);
+  if(/^[0-9]/.test(id)) id='';
+  if(RESERVED[id]) id=id+'Var';
+  S.g2Name=id;
+  emitCode(); scheduleSave();
+});
+document.getElementById('g2Name').addEventListener('change',function(){
+  this.value=S.g2Name||'g2';
+});
+
 document.getElementById('gridCol').oninput=function(){ S.gridColor=this.value; draw(); };
 document.getElementById('gridW').addEventListener('input',function(){
   var v=parseFloat(this.value);
@@ -3547,6 +3949,7 @@ document.getElementById('gridChk').onchange=function(){ S.showGrid=this.checked;
 document.getElementById('snapChk').onchange=function(){ S.snap=this.checked; syncRail(); };
 document.getElementById('labelsChk').onchange=function(){ S.labels=this.checked; draw(); };
 document.getElementById('aaChk').onchange=function(){ S.aa=this.checked; emitCode(); draw(); };
+document.getElementById('solidChk').onchange=function(){ S.solidView=this.checked; draw(); scheduleSave(); };
 document.getElementById('className').oninput=function(){ emitCode(); };
 document.getElementById('outMode').addEventListener('click',function(e){
   var b=e.target.closest('button'); if(!b) return;
@@ -3767,16 +4170,21 @@ function projectData(withImages){
       if(l.tex) l.tex.src='';
     });
   }
-  return {version:6,W:S.W,H:S.H,grid:S.grid,
+  return {version:8,W:S.W,H:S.H,grid:S.grid,
     gridLook:{color:S.gridColor,opacity:S.gridOpacity,width:S.gridWidth,
               major:S.gridMajor,style:S.gridStyle},
     className:document.getElementById('className').value,
+    bg:S.bg,bgSet:S.bgSet,varPrefix:S.varPrefix,g2Name:S.g2Name,solidView:S.solidView,
+    precision:S.precision,
+    rulers:{list:S.measures,mode:S.measMode,snaps:S.measSnaps,show:S.measShow},
     layers:layers,active:S.active,
+    lab:{shapes:LAB.shapes,expr:LAB.expr},
     image:(withImages&&S.img)?{src:S.img.src,x:S.img.x,y:S.img.y,scale:S.img.scale,alpha:S.img.alpha}:null,
     trimmed:!withImages};
 }
 function isBlankSheet(){
-  return S.layers.length===1&&S.layers[0].kind==='path'&&!(S.layers[0].pts||[]).length&&!S.img;
+  return S.layers.length===1&&S.layers[0].kind==='path'&&!(S.layers[0].pts||[]).length
+    &&!S.img&&!LAB.shapes.length&&!S.measures.length;
 }
 function saveSession(){
   if(!S.remember) return;
@@ -3836,7 +4244,34 @@ function applyProject(d){
   });
   document.getElementById('w').value=S.W;
   document.getElementById('h').value=S.H;
-  syncGridUI();
+  S.bg=d.bg||'#ffffff';
+  S.bgSet=(d.bgSet===undefined)?true:!!d.bgSet;
+  S.varPrefix=d.varPrefix||'';
+  S.g2Name=d.g2Name||'g2';
+  S.precision=(typeof d.precision==='number')?d.precision:2;
+  var ru=d.rulers||{};
+  S.measures=Array.isArray(ru.list)?ru.list:[];
+  S.measMode=MEASMODE[ru.mode]||'span';
+  S.measSnaps=Array.isArray(ru.snaps)?ru.snaps.filter(function(k){ return SNAPKINDS.indexOf(k)>=0; })
+                                     :SNAPKINDS.slice();
+  S.measShow=(ru.show===undefined)?true:!!ru.show;
+  S.measSel=S.measures.length?0:-1;
+  S.measDraft=null; S.measGapFrom=-1;
+  S.solidView=!!d.solidView;
+  if(S.layers.some(function(l){ return l.isClip; })
+     && !S.layers.some(function(l){ return l.clipped; })){
+    var seen=false;
+    S.layers.forEach(function(l){ if(seen&&!l.isClip) l.clipped=true; if(l.isClip) seen=true; });
+  }
+  syncGridUI(); syncSheetUI(); syncPrecisionUI(); syncMeasures();
+  // the lab is scratch work, but losing it on a refresh would still sting
+  LAB.shapes=(d.lab&&d.lab.shapes||[]).map(normalize)
+    .filter(function(l){ return !!l.labTag; });
+  LAB.expr=(d.lab&&d.lab.expr)||'A − B';
+  LAB.sel=LAB.shapes.length?0:-1;
+  LABCACHE={k:null,rings:null,err:''};
+  LABHIST.length=0;
+  if(LAB.on){ document.getElementById('slExpr').value=LAB.expr; labChanged(); }
   if(d.className) document.getElementById('className').value=d.className;
   if(d.image&&d.image.src) loadImageSrc(d.image.src,d.image);
   sync();
@@ -3861,7 +4296,7 @@ document.getElementById('exportPng').onclick=function(){
   c.width=S.W*dpr; c.height=S.H*dpr;
   var cc=c.getContext('2d');
   cc.scale(dpr,dpr);
-  cc.fillStyle='#fff'; cc.fillRect(0,0,S.W,S.H);
+  cc.fillStyle=sheetBg(); cc.fillRect(0,0,S.W,S.H);
   paintAll(cc,1,[],true);
   c.toBlob(function(b){ download('path-plotter.png',b); toast('PNG exported'); });
 };
@@ -3891,14 +4326,20 @@ function pvScale(){
 }
 // how many shapes hang off the panel: the sheet border hides this, Swing will not
 function pvClipped(){
-  var n=0;
-  S.layers.forEach(function(l){
+  var out=[];
+  S.layers.forEach(function(l,i){
     if(!l.visible) return;
     var b=layerBox(l); if(!b) return;
-    if(b.x0<-0.5||b.y0<-0.5||b.x1>S.W+0.5||b.y1>S.H+0.5) n++;
+    if(b.x0<-0.5||b.y0<-0.5||b.x1>S.W+0.5||b.y1>S.H+0.5) out.push(i);
   });
-  return n;
+  return out;
 }
+// the warning names the offenders; clicking one selects it so it can be found
+document.getElementById('pvWarn').addEventListener('click',function(e){
+  var b=e.target.closest('.pvpick'); if(!b) return;
+  var i=+b.dataset.i; if(!S.layers[i]) return;
+  setSel([i],i); S.sel=null; sync();
+});
 function paintPreview(){
   if(!pvOn) return;
   var cv=document.getElementById('pvCanvas');
@@ -3909,7 +4350,7 @@ function paintPreview(){
   var c=cv.getContext('2d');
   c.setTransform(dpr*sc,0,0,dpr*sc,0,0);
   c.imageSmoothingEnabled=S.aa;
-  c.fillStyle='#fff'; c.fillRect(0,0,S.W,S.H);
+  c.fillStyle=sheetBg(); c.fillRect(0,0,S.W,S.H);
   paintAll(c,1,[],true);          // solid: no dimming, no editor furniture
 
   var cn=classNameOf();
@@ -3919,11 +4360,20 @@ function paintPreview(){
     '≈ '+(S.W+PV_INSET.side*2)+' × '+(S.H+PV_INSET.top+PV_INSET.bottom);
   document.getElementById('pvZoom').textContent=Math.round(sc*100)+'%';
 
-  var n=pvClipped();
-  document.getElementById('pvWarn').textContent = n
-    ? (n===1?'1 shape reaches past the panel and Swing will clip it.'
-            :n+' shapes reach past the panel and Swing will clip them.')
-    : '';
+  var clip=pvClipped(), warn=document.getElementById('pvWarn');
+  // the key carries names too, so renaming a clipped shape refreshes its button
+  var key=clip.map(function(i){ return i+':'+S.layers[i].name; }).join(',');
+  // paintPreview runs per frame: only touch the DOM when the offending set changes,
+  // otherwise the buttons are replaced out from under the pointer mid-click
+  if(warn.dataset.key!==key){
+    warn.dataset.key=key;
+    var names=clip.map(function(i){
+      return '<button type="button" class="pvpick" data-i="'+i+'">'+esc(S.layers[i].name)+'</button>';
+    }).join(', ');
+    warn.innerHTML = !clip.length ? ''
+      : clip.length===1 ? names+' reaches past the panel and Swing will clip it.'
+      : clip.length+' shapes reach past the panel and Swing will clip them: '+names+'.';
+  }
   document.getElementById('pvNote').innerHTML =
     'The panel is exactly the sheet. The frame is bigger by the window insets, which is '
     +'why <code>pack()</code> in the emitted <code>main</code> is the only reliable way to '
@@ -3978,7 +4428,9 @@ document.getElementById('pvHead').addEventListener('pointerdown',function(e){
 /* ================= drawer, copy, toast ================= */
 
 document.getElementById('drawerBar').onclick=function(e){
-  if(e.target.closest('#copy')||e.target.closest('#outMode')) return;
+  // any control in the bar acts on its own; only the bare bar toggles the drawer.
+  // listing controls by id missed 'build once' and would miss the next one added
+  if(e.target.closest('button,input,label,select')) return;
   document.getElementById('drawer').classList.toggle('shut');
   requestAnimationFrame(resize);
 };
@@ -4101,6 +4553,13 @@ document.getElementById('fineStep').addEventListener('input',function(){
   var v=parseInt(this.value,10);
   if(!isNaN(v)&&v>0) S.fineStep=v;
 });
+// only redraw on the edge: a held key repeats, and the grips do not move
+function setScaleMod(on){
+  on=!!on;
+  if(on===S.scaleMod) return;
+  S.scaleMod=on;
+  if(S.tool==='select') draw();
+}
 function fineStatus(on){
   if(textEdit) return;
   if(on) setStatus('fine','Fine placement: snapping off, '+S.fineStep+'px steps',true);
@@ -4168,17 +4627,29 @@ document.getElementById('editOnCanvas').onclick=function(){
 // the fine key has to be live even when the pointer is still
 document.addEventListener('keydown',function(e){
   if(fineOn(e)&&!S.fine){ S.fine=true; fineStatus(true); }
+  setScaleMod(e.ctrlKey||e.metaKey);
 });
 document.addEventListener('keyup',function(e){
   if(S.fine&&!fineOn(e)){ S.fine=false; fineStatus(false); }
+  setScaleMod(e.ctrlKey||e.metaKey);
 });
 window.addEventListener('blur',function(){
   if(S.fine){ S.fine=false; fineStatus(false); }
+  setScaleMod(false);
 });
 
 document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){ MENUCLOSE(); hideCtx(); if(pvOn) showPreview(false); }
-  if(/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  if(e.key==='Escape'){
+    if(measCancel()){ e.preventDefault(); return; }
+    MENUCLOSE(); hideCtx(); if(pvOn) showPreview(false); if(LAB.on) showSetLab(false);
+  }
+  // A checkbox or a slider has no undo of its own, so the app's has to reach it:
+  // ticking "Use as clip region" and pressing Ctrl+Z used to do nothing at all.
+  // Typing fields keep their own undo, and the bare letter keys stay out of both.
+  var ae=document.activeElement, tag=ae.tagName;
+  var typing=(tag==='TEXTAREA')||
+    (tag==='INPUT'&&/^(text|number|search|email|url|tel|password)$/.test(ae.type||'text'));
+  if(typing) return;
   var k=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey)&&k==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
   if((e.ctrlKey||e.metaKey)&&k==='y'){ e.preventDefault(); redo(); return; }
@@ -4193,6 +4664,7 @@ document.addEventListener('keydown',function(e){
     setSel(all,S.active); S.sel=null; sync(); return;
   }
   if(e.ctrlKey||e.metaKey) return;
+  if(/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;   // no tool switching from a control
   if(e.key==='?'){ document.getElementById('help').classList.toggle('on'); return; }
   if(k==='escape'){ document.getElementById('help').classList.remove('on'); return; }
 
@@ -4208,13 +4680,17 @@ document.addEventListener('keydown',function(e){
   else if(k==='i') setTool('image');
   else if(k==='g'){ S.showGrid=!S.showGrid; document.getElementById('gridChk').checked=S.showGrid; syncRail(); draw(); }
   else if(k==='s'){ S.snap=!S.snap; document.getElementById('snapChk').checked=S.snap; syncRail(); toast(S.snap?'Snap on':'Snap off'); }
+  else if(k==='d'){ S.solidView=!S.solidView; document.getElementById('solidChk').checked=S.solidView; draw(); scheduleSave(); toast(S.solidView?'True opacity: all shapes solid':'Dimming unselected shapes'); }
   else if(k==='m'){ S.nextIsMove=true; if(S.tool==='select') setTool('line'); toast('Next click starts a new subpath'); }
+  else if(k==='l') setTool('measure');
   else if(k==='p') showPreview();
+  else if(k==='b') showSetLab();
   else if(k==='n') document.getElementById('addLayer').click();
   else if(k==='u'){ var l0=L(); if(l0.kind==='path'&&l0.pts.length){ push(); l0.pts.pop(); S.sel=null; sync(); } }
   else if(k==='delete'||k==='backspace'){
     e.preventDefault();
-    if(S.sel) deleteSelected(); else deleteLayers();
+    if(S.tool==='measure'&&S.measSel>=0) measDelete(S.measSel);
+    else if(S.sel) deleteSelected(); else deleteLayers();
   }
   else if(k==='0') fitView();
   else if(k==='='||k==='+') zoomCentre(S.view.z*1.25);
@@ -4239,6 +4715,22 @@ document.addEventListener('keydown',function(e){
 
 /* ================= session wiring ================= */
 
+['input','change'].forEach(function(ev){
+  document.getElementById('precision').addEventListener(ev,function(){
+    var v=parseInt(this.value,10);
+    if(!isFinite(v)) return;
+    S.precision=Math.max(0,Math.min(6,v));
+    syncPrecisionUI(); emitCode(); scheduleSave();
+    if(LAB.on) labRenderOut();
+  });
+});
+document.getElementById('precWhole').onclick=function(){
+  S.precision=0;
+  syncPrecisionUI(); emitCode(); scheduleSave();
+  if(LAB.on) labRenderOut();
+  toast('Coordinates written as whole pixels');
+};
+
 document.getElementById('remember').onchange=function(){
   S.remember=this.checked;
   lsSet(RKEY,S.remember?'1':'0');
@@ -4254,6 +4746,1403 @@ window.addEventListener('beforeunload',saveSession);
 document.addEventListener('visibilitychange',function(){
   if(document.visibilityState==='hidden') saveSession();
 });
+
+/* ================= ruler =================
+   A measuring tool, not a drawing one: nothing here ever reaches the Java or the
+   window preview. What makes it worth having is where the ends land -- CAD's
+   object snaps. Asking for "the midpoint" should give you the real midpoint of
+   that segment, not the nearest grid intersection to where you happened to click,
+   so every candidate below is derived from the geometry and named on screen
+   before you commit to it. Measurements are records of what you measured: they
+   keep the coordinates they were taken at rather than trailing a shape around. */
+
+var SNAPKINDS=['endpoint','midpoint','centre','quadrant','intersection','grid'];
+// a nearer candidate usually wins, but a corner a couple of pixels further off is
+// still what you meant; the bonus is the tie-break, in screen pixels
+var SNAPBONUS={endpoint:3,intersection:2.5,midpoint:2,quadrant:1.5,centre:1,grid:0};
+var SNAPGLYPH={endpoint:'square',midpoint:'triangle',centre:'circle',
+               quadrant:'diamond',intersection:'cross',grid:'plus'};
+
+var MEASMODE={span:'span',angle:'angle',gap:'gap'};
+
+/* ---- candidates ---- */
+
+function measEnabled(k){ return S.measSnaps.indexOf(k)>=0; }
+
+function boxPoints(b,out,name){
+  out.push({x:b.x0,y:b.y0,kind:'endpoint',of:name},
+           {x:b.x1,y:b.y0,kind:'endpoint',of:name},
+           {x:b.x1,y:b.y1,kind:'endpoint',of:name},
+           {x:b.x0,y:b.y1,kind:'endpoint',of:name});
+  out.push({x:(b.x0+b.x1)/2,y:b.y0,kind:'midpoint',of:name},
+           {x:b.x1,y:(b.y0+b.y1)/2,kind:'midpoint',of:name},
+           {x:(b.x0+b.x1)/2,y:b.y1,kind:'midpoint',of:name},
+           {x:b.x0,y:(b.y0+b.y1)/2,kind:'midpoint',of:name});
+  out.push({x:(b.x0+b.x1)/2,y:(b.y0+b.y1)/2,kind:'centre',of:name});
+}
+
+// everything a single shape offers, in sheet space with its transform applied
+function snapPointsFor(l){
+  var out=[],g=norm(l.g),n=l.name,i;
+  if(l.kind==='rect'||l.kind==='image'){
+    boxPoints({x0:g.x,y0:g.y,x1:g.x+g.w,y1:g.y+g.h},out,n);
+  } else if(l.kind==='ellipse'){
+    var cx=g.x+g.w/2, cy=g.y+g.h/2, rx=g.w/2, ry=g.h/2;
+    out.push({x:cx,y:cy,kind:'centre',of:n});
+    // the four points where the curve is horizontal or vertical: CAD's quadrants,
+    // and the only points on an ellipse a bounding box actually touches
+    out.push({x:cx+rx,y:cy,kind:'quadrant',of:n},{x:cx,y:cy+ry,kind:'quadrant',of:n},
+             {x:cx-rx,y:cy,kind:'quadrant',of:n},{x:cx,y:cy-ry,kind:'quadrant',of:n});
+  } else if(l.kind==='arc'){
+    var acx=g.x+g.w/2, acy=g.y+g.h/2, arx=g.w/2, ary=g.h/2;
+    out.push({x:acx,y:acy,kind:'centre',of:n});
+    out.push(Object.assign(arcPoint(acx,acy,arx,ary,l.g.start),{kind:'endpoint',of:n}));
+    out.push(Object.assign(arcPoint(acx,acy,arx,ary,l.g.start+l.g.extent),
+             {kind:'endpoint',of:n}));
+    out.push(Object.assign(arcPoint(acx,acy,arx,ary,l.g.start+l.g.extent/2),
+             {kind:'midpoint',of:n}));
+  } else if(l.kind==='text'){
+    var tb=layerBounds(l);
+    if(tb) boxPoints(tb,out,n);
+    out.push({x:l.text.x,y:l.text.y,kind:'endpoint',of:n});   // where the baseline starts
+  } else if(l.kind==='path'){
+    var pts=l.pts||[];
+    for(i=0;i<pts.length;i++){
+      out.push({x:pts[i].x,y:pts[i].y,kind:'endpoint',of:n});
+      if(i>0&&pts[i].cmd!=='move')
+        out.push(Object.assign(segPoint(pts[i-1],pts[i],0.5),{kind:'midpoint',of:n}));
+    }
+    var pb=layerBounds(l);
+    if(pb) out.push({x:(pb.x0+pb.x1)/2,y:(pb.y0+pb.y1)/2,kind:'centre',of:n});
+  }
+  if(hasTf(l)){
+    var T=tfMapper(l);
+    out=out.map(function(p){ var q=T(p.x,p.y); return {x:q.x,y:q.y,kind:p.kind,of:p.of}; });
+  }
+  return out;
+}
+
+// crossings between two outlines. Only worth computing for shapes the pointer is
+// already near, so the flattened rings never get walked in full on a quiet move
+function crossingsNear(px,py,r){
+  var near=[],out=[];
+  S.layers.forEach(function(l,i){
+    if(!l.visible||l.kind==='image') return;
+    var b=layerBox(l);
+    if(!b||px<b.x0-r||px>b.x1+r||py<b.y0-r||py>b.y1+r) return;
+    var rings=memberRings(l,null);
+    if(rings&&rings.length) near.push({l:l,rings:rings});
+  });
+  if(near.length<2) return out;
+  function segsOf(m){
+    var s=[];
+    m.rings.forEach(function(ring){
+      for(var j=0;j<ring.length;j++){
+        var a=ring[j], b=ring[(j+1)%ring.length];
+        // only the pieces running past the pointer can cross inside the radius
+        if(Math.min(a.x,b.x)>px+r||Math.max(a.x,b.x)<px-r) continue;
+        if(Math.min(a.y,b.y)>py+r||Math.max(a.y,b.y)<py-r) continue;
+        s.push({a:a,b:b});
+      }
+    });
+    return s;
+  }
+  for(var i=0;i<near.length;i++){
+    var si=segsOf(near[i]);
+    if(!si.length) continue;
+    for(var j=i+1;j<near.length;j++){
+      var sj=segsOf(near[j]);
+      if(!sj.length||si.length*sj.length>40000) continue;
+      for(var a=0;a<si.length;a++) for(var b=0;b<sj.length;b++){
+        var hit=segInt(si[a],sj[b]);
+        if(!hit) continue;
+        out.push({x:si[a].a.x+(si[a].b.x-si[a].a.x)*hit.t,
+                  y:si[a].a.y+(si[a].b.y-si[a].a.y)*hit.t,
+                  kind:'intersection',of:near[i].l.name+' × '+near[j].l.name});
+      }
+    }
+  }
+  return out;
+}
+
+// An end placed on nothing in particular lands on a whole pixel. This is a sheet
+// measured in pixels, so 216.387 is noise dressed up as precision, and it makes
+// every reading downstream look approximate when it is not. Holding the fine key
+// steps by the configured amount instead, the same as placing anything else --
+// that step is a whole number too, so nothing here can land between pixels.
+// Ends that snap keep their exact coordinates: an arc endpoint really is at
+// 240.47694, and rounding it away would throw out the reason the snap exists.
+function measFree(v){
+  return S.fine?Math.round(v/S.fineStep)*S.fineStep:Math.round(v);
+}
+// the one candidate the pointer is actually asking for, or a plain unsnapped point
+function measSnap(sx,sy){
+  var r=13/S.view.z, best=null, bestScore=1e9;
+  function consider(p){
+    if(!measEnabled(p.kind)) return;
+    var d=Math.hypot(p.x-sx,p.y-sy);
+    if(d>r) return;
+    var score=d*S.view.z-(SNAPBONUS[p.kind]||0);
+    if(score<bestScore){ bestScore=score; best=p; }
+  }
+  S.layers.forEach(function(l){
+    if(!l.visible) return;
+    snapPointsFor(l).forEach(consider);
+  });
+  if(measEnabled('intersection')) crossingsNear(sx,sy,r).forEach(consider);
+  if(measEnabled('grid')&&S.grid>0)
+    consider({x:Math.round(sx/S.grid)*S.grid,y:Math.round(sy/S.grid)*S.grid,
+              kind:'grid',of:S.grid+' px grid'});
+  if(best) return {x:best.x,y:best.y,kind:best.kind,of:best.of};
+  return {x:measFree(sx),y:measFree(sy),kind:null,of:null};
+}
+
+/* ---- gap between two outlines ---- */
+
+function segDist(p,q,a,b){          // distance between segment pq and segment ab
+  function pd(px,py,ax,ay,bx,by){
+    var dx=bx-ax, dy=by-ay, L=dx*dx+dy*dy;
+    var t=L?Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L)):0;
+    return {d:Math.hypot(px-(ax+dx*t),py-(ay+dy*t)),x:ax+dx*t,y:ay+dy*t};
+  }
+  if(segInt({a:p,b:q},{a:a,b:b})) return {d:0,p:p,q:p};
+  var c=[];
+  var r1=pd(p.x,p.y,a.x,a.y,b.x,b.y); c.push({d:r1.d,p:p,q:{x:r1.x,y:r1.y}});
+  var r2=pd(q.x,q.y,a.x,a.y,b.x,b.y); c.push({d:r2.d,p:q,q:{x:r2.x,y:r2.y}});
+  var r3=pd(a.x,a.y,p.x,p.y,q.x,q.y); c.push({d:r3.d,p:{x:r3.x,y:r3.y},q:a});
+  var r4=pd(b.x,b.y,p.x,p.y,q.x,q.y); c.push({d:r4.d,p:{x:r4.x,y:r4.y},q:b});
+  return c.reduce(function(m,o){ return o.d<m.d?o:m; });
+}
+// rings can run to thousands of points after flattening; a clearance figure does
+// not need every one of them, and an O(n·m) sweep over the lot would stall a drag
+function decimate(rings,cap){
+  var total=0;
+  rings.forEach(function(r){ total+=r.length; });
+  var step=Math.max(1,Math.ceil(total/cap)),out=[];
+  rings.forEach(function(r){
+    var keep=[];
+    for(var i=0;i<r.length;i+=step) keep.push(r[i]);
+    if(keep.length>=2) out.push(keep);
+  });
+  return out.length?out:rings;
+}
+function ringSegs(rings){
+  var s=[];
+  rings.forEach(function(r){
+    for(var i=0;i<r.length;i++) s.push({a:r[i],b:r[(i+1)%r.length]});
+  });
+  return s;
+}
+function measureGap(i,j){
+  var la=S.layers[i], lb=S.layers[j];
+  if(!la||!lb) return null;
+  var ra=memberRings(la,null), rb=memberRings(lb,null);
+  if(!ra||!ra.length||!rb||!rb.length) return null;
+  var sa=ringSegs(decimate(ra,260)), sb=ringSegs(decimate(rb,260));
+  var best={d:1e12,p:null,q:null};
+  for(var a=0;a<sa.length;a++) for(var b=0;b<sb.length;b++){
+    var r=segDist(sa[a].a,sa[a].b,sb[b].a,sb[b].b);
+    if(r.d<best.d) best={d:r.d,p:r.p,q:r.q};
+  }
+  if(!best.p) return null;
+  var ba=layerBox(la), bb=layerBox(lb);
+  // the axis figures are what a layout actually cares about, and they only mean
+  // anything when the two boxes share that axis' band
+  var hGap=null,vGap=null;
+  if(ba&&bb){
+    if(ba.y1>bb.y0&&bb.y1>ba.y0) hGap=Math.max(0,Math.max(ba.x0,bb.x0)-Math.min(ba.x1,bb.x1));
+    if(ba.x1>bb.x0&&bb.x1>ba.x0) vGap=Math.max(0,Math.max(ba.y0,bb.y0)-Math.min(ba.y1,bb.y1));
+  }
+  return {kind:'gap',a:{x:best.p.x,y:best.p.y},b:{x:best.q.x,y:best.q.y},
+          d:best.d,hGap:hGap,vGap:vGap,of:la.name+' → '+lb.name};
+}
+
+/* ---- readouts ---- */
+
+function measSpanText(m){
+  var dx=m.b.x-m.a.x, dy=m.b.y-m.a.y;
+  return {d:Math.hypot(dx,dy),dx:dx,dy:dy,
+          ang:(Math.atan2(-dy,dx)*180/Math.PI+360)%360};
+}
+function measAngleAt(m){
+  var v=m.v||m.a;
+  var a1=Math.atan2(m.a.y-v.y,m.a.x-v.x), a2=Math.atan2(m.b.y-v.y,m.b.x-v.x);
+  var d=(a2-a1)*180/Math.PI;
+  while(d<=-180) d+=360;
+  while(d>180) d-=360;
+  return {deg:Math.abs(d),signed:d,a1:a1,a2:a2};
+}
+function mnum(v){ return roundTo(v,S.precision>0?S.precision:1); }
+// the canvas pill has to say what it is; the list already has a kind column
+function measLabel(m,onSheet){
+  if(m.kind==='gap'){
+    var g=(onSheet?'gap ':'')+mnum(m.d);
+    if(m.hGap!==null&&m.hGap!==undefined) g+='   h '+mnum(m.hGap);
+    if(m.vGap!==null&&m.vGap!==undefined) g+='   v '+mnum(m.vGap);
+    return g;
+  }
+  if(m.kind==='angle') return mnum(measAngleAt(m).deg)+'°';
+  var s=measSpanText(m);
+  return mnum(s.d);
+}
+function measDetail(m){
+  if(m.kind==='gap')
+    return 'closest approach '+mnum(m.d)+' px'
+      +(m.hGap!==null&&m.hGap!==undefined?',  horizontal '+mnum(m.hGap):'')
+      +(m.vGap!==null&&m.vGap!==undefined?',  vertical '+mnum(m.vGap):'');
+  if(m.kind==='angle'){
+    // two rays enclose two angles; the pill takes the lesser, by convention,
+    // but on a wide arc the reflex is just as often the one being asked for
+    var ad=measAngleAt(m).deg;
+    return mnum(ad)+'° at the vertex   ·   reflex '+mnum(360-ad)+'°';
+  }
+  var s=measSpanText(m);
+  return 'd '+mnum(s.d)+'   dx '+mnum(s.dx)+'   dy '+mnum(s.dy)+'   ∠ '+mnum(s.ang)+'°';
+}
+
+/* ---- painting ---- */
+
+var MEASINK='#b02f4c', MEASDARK='#17242b';
+
+function measPill(c,x,y,text,z,accent){
+  c.font='500 '+(11/z)+'px "IBM Plex Mono", monospace';
+  var w=c.measureText(text).width, padx=6/z, h=17/z;
+  var bx=x-w/2-padx, by=y-h/2, bw=w+padx*2, r=3/z;
+  c.beginPath();
+  c.moveTo(bx+r,by); c.arcTo(bx+bw,by,bx+bw,by+h,r);
+  c.arcTo(bx+bw,by+h,bx,by+h,r); c.arcTo(bx,by+h,bx,by,r); c.arcTo(bx,by,bx+bw,by,r);
+  c.closePath();
+  c.fillStyle=accent||MEASDARK; c.fill();
+  c.fillStyle='#eef1ea';
+  c.textAlign='center'; c.textBaseline='middle';
+  c.fillText(text,x,y);
+  c.textAlign='left'; c.textBaseline='alphabetic';
+}
+function measTick(c,a,b,z){          // the serif that caps a measurement line
+  var dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1, t=6/z;
+  var nx=-dy/L*t, ny=dx/L*t;
+  c.beginPath();
+  c.moveTo(a.x-nx,a.y-ny); c.lineTo(a.x+nx,a.y+ny);
+  c.moveTo(b.x-nx,b.y-ny); c.lineTo(b.x+nx,b.y+ny);
+  c.stroke();
+}
+function drawSnapMark(c,p,z){
+  var r=4.5/z;
+  c.save();
+  c.strokeStyle=MEASINK; c.lineWidth=1.6/z; c.fillStyle='#fff';
+  c.beginPath();
+  var k=SNAPGLYPH[p.kind];
+  if(k==='square'){ c.rect(p.x-r,p.y-r,r*2,r*2); c.fill(); c.stroke(); }
+  else if(k==='circle'){ c.arc(p.x,p.y,r,0,Math.PI*2); c.fill(); c.stroke(); }
+  else if(k==='triangle'){
+    c.moveTo(p.x,p.y-r); c.lineTo(p.x+r,p.y+r*0.8); c.lineTo(p.x-r,p.y+r*0.8);
+    c.closePath(); c.fill(); c.stroke();
+  } else if(k==='diamond'){
+    c.moveTo(p.x,p.y-r); c.lineTo(p.x+r,p.y); c.lineTo(p.x,p.y+r); c.lineTo(p.x-r,p.y);
+    c.closePath(); c.fill(); c.stroke();
+  } else if(k==='cross'){
+    c.moveTo(p.x-r,p.y-r); c.lineTo(p.x+r,p.y+r);
+    c.moveTo(p.x+r,p.y-r); c.lineTo(p.x-r,p.y+r); c.stroke();
+  } else {
+    c.moveTo(p.x-r,p.y); c.lineTo(p.x+r,p.y);
+    c.moveTo(p.x,p.y-r); c.lineTo(p.x,p.y+r); c.stroke();
+  }
+  if(p.kind){
+    var txt=p.kind+(p.of?' · '+p.of:'');
+    c.font=(10.5/z)+'px "IBM Plex Mono", monospace';
+    var w=c.measureText(txt).width;
+    c.fillStyle='rgba(23,36,43,.9)';
+    c.fillRect(p.x+8/z,p.y-20/z,w+8/z,15/z);
+    c.fillStyle='#eef1ea';
+    c.textBaseline='middle';
+    c.fillText(txt,p.x+12/z,p.y-12.5/z);
+    c.textBaseline='alphabetic';
+  }
+  c.restore();
+}
+// a measurement has to stay readable wherever it lands, and it lands on top of
+// filled shapes by definition. A pale halo under every stroke buys that without
+// tinting the drawing underneath the way a translucent line would
+function measStroke(c,z,sel,draw){
+  c.save();
+  c.strokeStyle='rgba(255,255,255,.75)';
+  c.lineWidth=(sel?4.5:3.6)/z;
+  c.lineCap='round'; c.lineJoin='round';
+  draw();
+  c.restore();
+  c.strokeStyle=MEASINK;
+  c.lineWidth=(sel?2:1.3)/z;
+  draw();
+}
+function drawOneMeasure(c,m,z,live,sel){
+  c.save();
+  c.strokeStyle=MEASINK;
+  c.lineWidth=(sel?2:1.3)/z;
+  c.globalAlpha=live?0.85:1;
+  if(m.kind==='angle'){
+    var v=m.v;
+    measStroke(c,z,sel,function(){
+      c.beginPath();
+      c.moveTo(m.a.x,m.a.y); c.lineTo(v.x,v.y); c.lineTo(m.b.x,m.b.y);
+      c.stroke();
+    });
+    var ang=measAngleAt(m), R=Math.min(30/z,
+      Math.hypot(m.a.x-v.x,m.a.y-v.y)*0.7, Math.hypot(m.b.x-v.x,m.b.y-v.y)*0.7);
+    if(R>2/z) measStroke(c,z,sel,function(){
+      c.beginPath();
+      c.arc(v.x,v.y,R,ang.a1,ang.a2,ang.signed<0);
+      c.stroke();
+    });
+    var mid=(ang.a1+ang.a2)/2+(Math.abs(ang.a2-ang.a1)>Math.PI?Math.PI:0);
+    measPill(c,v.x+Math.cos(mid)*(R+16/z),v.y+Math.sin(mid)*(R+16/z),measLabel(m,true),z);
+  } else {
+    measStroke(c,z,sel,function(){
+      c.beginPath(); c.moveTo(m.a.x,m.a.y); c.lineTo(m.b.x,m.b.y); c.stroke();
+    });
+    if(m.kind==='gap'){
+      c.save();
+      c.setLineDash([5/z,4/z]); c.strokeStyle='#4f7a3a'; c.lineWidth=(sel?2:1.4)/z;
+      c.beginPath(); c.moveTo(m.a.x,m.a.y); c.lineTo(m.b.x,m.b.y); c.stroke();
+      c.restore();
+    }
+    measStroke(c,z,sel,function(){ measTick(c,m.a,m.b,z); });
+    measPill(c,(m.a.x+m.b.x)/2,(m.a.y+m.b.y)/2-12/z,measLabel(m,true),z,
+             m.kind==='gap'?'#4f7a3a':null);
+  }
+  if(sel){
+    var r=4/z;
+    c.fillStyle='#fff';
+    [m.a,m.b,m.v].forEach(function(p){
+      if(!p) return;
+      c.beginPath(); c.rect(p.x-r,p.y-r,r*2,r*2); c.fill(); c.stroke();
+    });
+  }
+  c.restore();
+}
+function drawMeasures(){
+  var z=S.view.z;
+  var showAll=S.measShow!==false;
+  if(showAll) S.measures.forEach(function(m,i){
+    drawOneMeasure(ctx,m,z,false,i===S.measSel&&S.tool==='measure');
+  });
+  if(S.tool!=='measure') return;
+  var d=S.measDraft;
+  if(d&&d.a&&d.b) drawOneMeasure(ctx,d,z,true,false);
+  else if(d&&d.a){
+    ctx.save();
+    ctx.strokeStyle=MEASINK; ctx.lineWidth=1.3/z; ctx.setLineDash([4/z,3/z]);
+    ctx.beginPath(); ctx.moveTo(d.a.x,d.a.y);
+    if(S.measHover) ctx.lineTo(S.measHover.x,S.measHover.y);
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+  }
+  // the shape the gap is measured from, once it has been picked
+  if(S.measMode==='gap'&&S.measGapFrom>=0&&S.layers[S.measGapFrom]){
+    var b=layerBox(S.layers[S.measGapFrom]);
+    if(b){
+      ctx.save();
+      ctx.strokeStyle='#4f7a3a'; ctx.lineWidth=1.5/z; ctx.setLineDash([6/z,4/z]);
+      ctx.strokeRect(b.x0,b.y0,b.x1-b.x0,b.y1-b.y0);
+      ctx.setLineDash([]); ctx.restore();
+    }
+  }
+  if(S.measHover&&S.measHover.kind) drawSnapMark(ctx,S.measHover,z);
+}
+
+/* ---- pointer ---- */
+
+function measHitMeasure(sx,sy){
+  var r=8/S.view.z;
+  for(var i=S.measures.length-1;i>=0;i--){
+    var m=S.measures[i], pts=[m.a,m.b,m.v];
+    for(var k=0;k<pts.length;k++)
+      if(pts[k]&&Math.hypot(pts[k].x-sx,pts[k].y-sy)<=r) return {i:i,grip:k};
+    var mid={x:(m.a.x+m.b.x)/2,y:(m.a.y+m.b.y)/2};
+    if(Math.hypot(mid.x-sx,mid.y-sy)<=r*1.6) return {i:i,grip:-1};
+  }
+  return null;
+}
+function measTopShapeAt(sx,sy){
+  for(var i=S.layers.length-1;i>=0;i--){
+    var l=S.layers[i];
+    if(l&&l.visible&&insideLayer(l,sx,sy)) return i;
+  }
+  return -1;
+}
+function measDown(s,e){
+  if(S.measMode==='gap'){
+    var hit=measTopShapeAt(s.x,s.y);
+    if(hit<0){ S.measGapFrom=-1; draw(); return; }
+    if(S.measGapFrom<0){ S.measGapFrom=hit; draw(); measStatus(); return; }
+    if(hit===S.measGapFrom){ S.measGapFrom=-1; draw(); measStatus(); return; }
+    var g=measureGap(S.measGapFrom,hit);
+    if(!g){ toast('Those two shapes have no outline to measure between'); return; }
+    push();
+    S.measures.push(g);
+    S.measSel=S.measures.length-1;
+    S.measGapFrom=-1;
+    syncMeasures(); draw(); scheduleSave();
+    return;
+  }
+  // grab an existing measurement before starting a new one
+  var grab=measHitMeasure(s.x,s.y);
+  if(grab&&!S.measDraft){
+    S.measSel=grab.i;
+    if(grab.grip>=0) S.measDrag={i:grab.i,grip:grab.grip};
+    syncMeasures(); draw(); return;
+  }
+  var p=measSnap(s.x,s.y);
+  if(!S.measDraft){ S.measDraft={kind:S.measMode,a:p}; draw(); measStatus(); return; }
+  if(S.measMode==='angle'){
+    if(!S.measDraft.v){ S.measDraft.v=p; draw(); measStatus(); return; }
+    S.measDraft.b=p;
+    push();
+    S.measures.push({kind:'angle',a:S.measDraft.a,v:S.measDraft.v,b:p});
+  } else {
+    push();
+    S.measures.push({kind:'span',a:S.measDraft.a,b:p});
+  }
+  S.measSel=S.measures.length-1;
+  S.measDraft=null;
+  syncMeasures(); draw(); scheduleSave();
+}
+function measMove(s){
+  S.measHover=(S.measMode==='gap')?null:measSnap(s.x,s.y);
+  if(S.measDrag){
+    var m=S.measures[S.measDrag.i];
+    if(m){
+      var p=measSnap(s.x,s.y);
+      var key=['a','b','v'][S.measDrag.grip];
+      if(m[key]){ m[key]={x:p.x,y:p.y,kind:p.kind,of:p.of}; }
+      if(m.kind==='gap'){ m.d=Math.hypot(m.b.x-m.a.x,m.b.y-m.a.y); m.hGap=null; m.vGap=null; }
+      syncMeasures();
+    }
+  }
+  // the draft's second leg follows the pointer, so the number moves with it
+  if(S.measDraft&&S.measHover){
+    if(S.measMode==='angle'&&S.measDraft.v)
+      S.measDraft.b={x:S.measHover.x,y:S.measHover.y};
+    else if(S.measMode!=='angle')
+      S.measDraft.b={x:S.measHover.x,y:S.measHover.y};
+  }
+  measStatus();
+  draw();
+}
+function measUp(){
+  if(S.measDrag){ S.measDrag=null; scheduleSave(); }
+}
+function measCancel(){
+  if(S.measDraft||S.measGapFrom>=0){
+    S.measDraft=null; S.measGapFrom=-1; draw(); measStatus(); return true;
+  }
+  return false;
+}
+function measStatus(){
+  if(S.tool!=='measure') return;
+  var d=S.measDraft;
+  if(S.measMode==='gap'){
+    setStatus('ruler',S.measGapFrom<0
+      ? 'Click the first shape, then the second, for the clearance between their outlines'
+      : 'Now click the shape to measure against  ·  Esc to start over',true);
+    return;
+  }
+  if(d&&d.a&&d.b&&(S.measMode!=='angle'||d.v)){
+    setStatus('ruler',measDetail(S.measMode==='angle'
+      ?{kind:'angle',a:d.a,v:d.v,b:d.b}:{kind:'span',a:d.a,b:d.b}),true);
+    return;
+  }
+  if(d&&S.measMode==='angle'&&!d.v){ setStatus('ruler','Now click the vertex of the angle',true); return; }
+  if(d){ setStatus('ruler','Click the far end  ·  Esc to start over',true); return; }
+  var sel=S.measures[S.measSel];
+  setStatus('ruler',sel?measDetail(sel):(HINTS.measure||''),false);
+}
+
+/* ---- panel ---- */
+
+function measKindTag(m){ return m.kind==='gap'?'gap':m.kind==='angle'?'angle':'span'; }
+// what the ends landed on. The snap kind is the part worth reading at a glance --
+// it is the difference between a measurement you can trust and one you eyeballed
+function measWhere(m,full){
+  if(m.of) return m.of;
+  var ends=[m.a,m.v,m.b].filter(Boolean);
+  return ends.map(function(p){
+    if(!p.kind) return full?'free':'·';
+    return full?(p.kind+(p.of?' of '+p.of:'')):p.kind;
+  }).join(' → ');
+}
+function syncMeasures(){
+  var host=document.getElementById('measList');
+  if(!host) return;
+  if(!S.measures.length){
+    host.innerHTML='<div class="empty">No measurements yet. Pick the ruler from the '
+      +'rail, then click two points.</div>';
+  } else {
+    host.innerHTML=S.measures.map(function(m,i){
+      return '<div class="measrow'+(i===S.measSel?' on':'')+'" data-i="'+i+'">'
+        +'<span class="mkind">'+measKindTag(m)+'</span>'
+        +'<span class="mval">'+esc(measLabel(m))+'</span>'
+        +'<span class="mof" title="'+esc(measWhere(m,true)).replace(/"/g,'&quot;')+'">'
+          +esc(measWhere(m,false))+'</span>'
+        +'<button type="button" class="x" data-del="'+i+'" title="Remove">×</button>'
+        +'</div>';
+    }).join('');
+  }
+  var det=document.getElementById('measDetail');
+  var sel=S.measures[S.measSel];
+  if(det) det.textContent=sel?measDetail(sel):'';
+  document.querySelectorAll('#measMode button').forEach(function(b){
+    b.setAttribute('aria-pressed',b.dataset.mm===S.measMode?'true':'false');
+  });
+  SNAPKINDS.forEach(function(k){
+    var el=document.getElementById('snap_'+k);
+    if(el) el.checked=measEnabled(k);
+  });
+  var sw=document.getElementById('measShow');
+  if(sw) sw.checked=S.measShow!==false;
+  var mn=document.getElementById('measModeNote');
+  if(mn) mn.textContent=MEASNOTE[S.measMode]||'';
+}
+function measDelete(i){
+  if(!S.measures[i]) return;
+  push();
+  S.measures.splice(i,1);
+  if(S.measSel>=S.measures.length) S.measSel=S.measures.length-1;
+  syncMeasures(); draw(); scheduleSave();
+}
+function measSetMode(m){
+  S.measMode=m;
+  S.measDraft=null; S.measGapFrom=-1;
+  syncMeasures(); measStatus(); draw();
+}
+
+
+/* ---- wiring ---- */
+
+var MEASNOTE={
+  span:'Click the two points to measure between. The readout carries the distance, '
+      +'its x and y components, and the angle from horizontal.',
+  angle:'Click the first arm, then the vertex, then the second arm.',
+  gap:'Click one shape, then another, for the closest approach between their outlines '
+     +'and the clear space on each axis.'
+};
+document.getElementById('measMode').addEventListener('click',function(e){
+  var b=e.target.closest('[data-mm]');
+  if(b) measSetMode(b.dataset.mm);
+});
+document.getElementById('measList').addEventListener('click',function(e){
+  var del=e.target.closest('[data-del]');
+  if(del){ measDelete(+del.dataset.del); return; }
+  var row=e.target.closest('.measrow');
+  if(!row) return;
+  S.measSel=+row.dataset.i;
+  syncMeasures(); measStatus(); draw();
+});
+document.getElementById('measSnaps').addEventListener('change',function(e){
+  var id=e.target.id;
+  if(!id||id.indexOf('snap_')!==0) return;
+  var k=id.slice(5), at=S.measSnaps.indexOf(k);
+  if(e.target.checked){ if(at<0) S.measSnaps.push(k); }
+  else if(at>=0) S.measSnaps.splice(at,1);
+  S.measHover=null;
+  draw(); scheduleSave();
+});
+document.getElementById('measShow').onchange=function(){
+  S.measShow=this.checked; draw(); scheduleSave();
+};
+document.getElementById('measDel').onclick=function(){
+  if(S.measSel<0){ toast('No measurement selected'); return; }
+  measDelete(S.measSel);
+};
+document.getElementById('measClear').onclick=function(){
+  if(!S.measures.length){ toast('Nothing to clear'); return; }
+  var n=S.measures.length;
+  push();
+  S.measures=[]; S.measSel=-1; S.measDraft=null; S.measGapFrom=-1;
+  syncMeasures(); draw(); scheduleSave();
+  toast('Cleared '+n+' measurement'+(n===1?'':'s'));
+};
+
+/* ================= set operation lab =================
+   Area algebra is easy to get wrong on the sheet: subtract runs strictly left
+   to right, and anything nested has to be unrolled into temporaries by hand.
+   The lab is a scratch sheet for exactly that -- lay operands down, write the
+   expression, watch the outline it really makes, and only then commit it.
+   It shares the sheet's coordinate space, so nothing shifts on the way over. */
+
+var LABCH={'∪':'add','+':'add','|':'add',
+           '∩':'intersect','&':'intersect','*':'intersect',
+           '−':'subtract','-':'subtract','\\':'subtract',
+           '⊕':'exclusiveOr','^':'exclusiveOr'};
+var LABSIGN={add:'∪',subtract:'−',intersect:'∩',exclusiveOr:'⊕'};
+
+var LAB={on:false,shapes:[],expr:'A − B',sel:-1,drag:null,pos:null,
+         scale:1,ast:null,err:'',rings:null,ghost:true,snap:true};
+var LABCACHE={k:null,rings:null,err:''};
+var LABHIST=[];
+
+function labEl(id){ return document.getElementById(id); }
+
+/* ---- operands ---- */
+
+function labFreeTag(){
+  var used={};
+  LAB.shapes.forEach(function(s){ used[s.labTag]=1; });
+  for(var i=0;i<26;i++){
+    var c=String.fromCharCode(65+i);
+    if(!used[c]) return c;
+  }
+  return null;
+}
+function labTags(){
+  var t={};
+  LAB.shapes.forEach(function(s,i){ t[s.labTag]=i; });
+  return t;
+}
+function labColor(i){ return PALETTE[i%PALETTE.length]; }
+
+// a regular n-gon, and its star sibling, as plain path points
+function labPoly(cx,cy,rx,ry,n,inner){
+  var pts=[], count=inner?n*2:n, R=Math.round;
+  for(var i=0;i<count;i++){
+    var a=-Math.PI/2+i*Math.PI*2/count;
+    var f=(inner&&(i%2))?inner:1;
+    pts.push({cmd:i?'line':'move',x:R(cx+Math.cos(a)*rx*f),y:R(cy+Math.sin(a)*ry*f)});
+  }
+  return pts;
+}
+var LABKINDS={rect:'rect',ellipse:'ellipse',arc:'arc',text:'text',
+              triangle:'path',star:'path',hexagon:'path'};
+
+function labAdd(kind){
+  var tag=labFreeTag();
+  if(!tag){ toast('The lab holds 26 operands at a time'); return; }
+  var l=normalize(defaults(kind+' '+tag,LABKINDS[kind]||'rect'));
+  var n=LAB.shapes.length, R=Math.round;
+  var w=Math.max(40,Math.min(210,R(S.W*0.36)));
+  var h=Math.max(40,Math.min(170,R(S.H*0.36)));
+  // fan them out, so a fresh operand never lands exactly on the last one
+  var cx=S.W/2+((n%3)-1)*w*0.34, cy=S.H/2+((n%2)?1:-1)*h*0.2;
+  l.labTag=tag;
+  l.fillColor=l.strokeColor=labColor(n);
+  l.render='fill';
+  l.g.x=R(cx-w/2); l.g.y=R(cy-h/2); l.g.w=w; l.g.h=h;
+  if(kind==='arc'){ l.g.start=0; l.g.extent=250; l.g.arcType='PIE'; }
+  if(kind==='triangle') l.pts=labPoly(cx,cy,w/2,h/2,3);
+  if(kind==='hexagon')  l.pts=labPoly(cx,cy,w/2,h/2,6);
+  if(kind==='star')     l.pts=labPoly(cx,cy,w/2,h/2,5,0.42);
+  if(kind==='text'){
+    l.text.s=tag; l.text.size=Math.max(24,R(h*0.8));
+    l.text.x=R(cx-w/3); l.text.y=R(cy+h/4);
+  }
+  labPush();
+  LAB.shapes.push(l);
+  LAB.sel=LAB.shapes.length-1;
+  if(!String(LAB.expr).trim()) LAB.expr=tag;
+  labEl('slExpr').value=LAB.expr;
+  labChanged();
+}
+
+// the sheet's own selection, copied in so a real shape can be tried against others
+function labPull(){
+  var src=S.selLayers.map(function(i){ return S.layers[i]; })
+    .filter(function(l){ return l&&l.kind!=='image'&&flattenLayer(l); });
+  if(!src.length){ toast('Select a shape on the sheet first'); return; }
+  if(LAB.shapes.length+src.length>26){ toast('That would push the lab past 26 operands'); return; }
+  labPush();
+  cloneLayers(src,0).forEach(function(c){
+    c.labTag=labFreeTag();
+    c.render='fill';
+    c.combine='none'; c.isClip=false; c.clipped=false; c.group=null;
+    // two operands answering to one name reads as a mistake in the list, even
+    // though the generator would quietly suffix the loser
+    if(LAB.shapes.some(function(s){ return s.name===c.name; })) c.name+=' '+c.labTag;
+    LAB.shapes.push(c);
+    LAB.sel=LAB.shapes.length-1;
+  });
+  labChanged();
+  toast(src.length===1?'Copied "'+src[0].name+'" into the lab'
+                     :'Copied '+src.length+' shapes into the lab');
+}
+
+function labRemove(i){
+  if(!LAB.shapes[i]) return;
+  labPush();
+  LAB.shapes.splice(i,1);
+  if(LAB.sel>=LAB.shapes.length) LAB.sel=LAB.shapes.length-1;
+  labChanged();
+}
+
+/* ---- the expression ----
+   Precedence follows set notation rather than Java's method chain: intersection
+   binds tightest, then difference, then union and symmetric difference. */
+
+function labParse(src,tags){
+  var s=String(src||''), i=0;
+  function ws(){ while(i<s.length&&/\s/.test(s.charAt(i))) i++; }
+  function peek(){ ws(); return i<s.length?s.charAt(i):''; }
+  function expr(){
+    var n=term(),c;
+    while((c=peek())&&(c==='∪'||c==='+'||c==='|'||c==='⊕'||c==='^')){
+      i++; n={op:LABCH[c],l:n,r:term()};
+    }
+    return n;
+  }
+  function term(){
+    var n=fact(),c;
+    while((c=peek())&&(c==='−'||c==='-'||c==='\\')){ i++; n={op:'subtract',l:n,r:fact()}; }
+    return n;
+  }
+  function fact(){
+    var n=atom(),c;
+    while((c=peek())&&(c==='∩'||c==='&'||c==='*')){ i++; n={op:'intersect',l:n,r:atom()}; }
+    return n;
+  }
+  function atom(){
+    var c=peek();
+    if(!c) throw new Error('The expression stops early — an operand was expected.');
+    if(c==='('){
+      i++;
+      var n=expr();
+      if(peek()!==')') throw new Error('A bracket is never closed.');
+      i++; return n;
+    }
+    if(/[A-Za-z]/.test(c)){
+      i++;
+      var t=c.toUpperCase();
+      if(!(t in tags)) throw new Error('There is no operand '+t+' in the lab.');
+      return {ref:tags[t]};
+    }
+    if(c===')') throw new Error('A bracket is closed without being opened.');
+    throw new Error('"'+c+'" is neither an operand nor an operator.');
+  }
+  var root=expr();
+  ws();
+  if(i<s.length) throw new Error('"'+s.slice(i)+'" is left over at the end.');
+  return root;
+}
+function labRefs(node,out){
+  if(node.ref!==undefined){ if(out.indexOf(node.ref)<0) out.push(node.ref); return out; }
+  labRefs(node.l,out); labRefs(node.r,out);
+  return out;
+}
+function labInside(node,members,x,y){
+  if(node.ref!==undefined) return pointInMember(members[node.ref],x,y);
+  var a=labInside(node.l,members,x,y), b=labInside(node.r,members,x,y);
+  if(node.op==='add') return a||b;
+  if(node.op==='subtract') return a&&!b;
+  if(node.op==='intersect') return a&&b;
+  return a!==b;
+}
+// the expression written back out with the operands' own letters
+function labText(node){
+  if(!node) return '';
+  if(node.ref!==undefined){ var l=LAB.shapes[node.ref]; return l?l.labTag:'?'; }
+  var a=labText(node.l), b=labText(node.r);
+  if(node.l.op) a='('+a+')';
+  if(node.r.op) b='('+b+')';
+  return a+' '+LABSIGN[node.op]+' '+b;
+}
+
+/* ---- solving ---- */
+
+function labMembers(){
+  return LAB.shapes.map(function(l){
+    var rings=memberRings(l,null);
+    return {rings:rings||[],
+      wind:(l.kind==='text'||l.wind==='evenodd')?'evenodd':'nonzero',
+      path:ringsToPath(rings||[])};
+  });
+}
+// an operand with nothing to trace behaves as new Area(emptyShape) does in Java,
+// so the solve carries on -- but silence about it would just look like a bug
+function labEmptyOperands(){
+  var out=[];
+  LAB.shapes.forEach(function(l){
+    var r=memberRings(l,null);
+    if(!r||!r.length) out.push(l.labTag);
+  });
+  return out;
+}
+// the same edge classification the sheet's Area preview uses, driven by the
+// expression tree instead of a straight top-to-bottom chain
+function labCompute(members,ast){
+  var refs=labRefs(ast,[]),segs=[],i;
+  refs.forEach(function(k){
+    members[k].rings.forEach(function(r){
+      for(var j=0;j<r.length;j++){
+        var a=r[j], b=r[(j+1)%r.length];
+        if(Math.abs(a.x-b.x)<1e-9&&Math.abs(a.y-b.y)<1e-9) continue;
+        segs.push({a:a,b:b});
+      }
+    });
+  });
+  if(!segs.length) return [];
+  if(segs.length>7000) throw new Error('Too many edges to solve — use simpler operands.');
+  var pieces=splitAll(segs);
+  if(pieces.length>14000) throw new Error('Too many crossings to solve — use simpler operands.');
+  var kept=[];
+  for(i=0;i<pieces.length;i++){
+    var s=pieces[i];
+    var mx=(s.a.x+s.b.x)/2, my=(s.a.y+s.b.y)/2;
+    var dx=s.b.x-s.a.x, dy=s.b.y-s.a.y, len=Math.hypot(dx,dy);
+    if(len<1e-7) continue;
+    var eps=Math.min(0.05,len*0.4);
+    var nx=-dy/len*eps, ny=dx/len*eps;
+    if(labInside(ast,members,mx+nx,my+ny)!==labInside(ast,members,mx-nx,my-ny))
+      kept.push({a:s.a,b:s.b});
+  }
+  if(!kept.length) return [];
+  return chainSegments(kept);
+}
+function labKey(){
+  return String(LAB.expr)+'\u0000'+LAB.shapes.map(function(l){
+    return l.labTag+'|'+l.kind+'|'+l.wind+'|'+JSON.stringify(l.tf)+'|'
+      +(l.kind==='path'?JSON.stringify(l.pts):JSON.stringify(l.g))
+      +(l.kind==='text'?JSON.stringify(l.text):'');
+  }).join('');
+}
+function labSolve(){
+  LAB.ast=null; LAB.rings=null; LAB.err='';
+  if(!LAB.shapes.length){ LAB.err='Add an operand to get started.'; return; }
+  if(!String(LAB.expr).trim()){ LAB.err='Write an expression, for example A − B.'; return; }
+  try{ LAB.ast=labParse(LAB.expr,labTags()); }
+  catch(e){ LAB.err=e.message; return; }
+  var key=labKey();
+  if(key===LABCACHE.k){ LAB.rings=LABCACHE.rings; LAB.err=LABCACHE.err; return; }
+  try{ LAB.rings=labCompute(labMembers(),LAB.ast); }
+  catch(e){ LAB.err=e.message; LAB.rings=null; }
+  LABCACHE={k:key,rings:LAB.rings,err:LAB.err};
+}
+
+/* ---- Java ----
+   A nested expression cannot be one chain of Area calls, so each bracketed part
+   gets its own Area and is folded back into its parent as an argument. */
+
+function labTemp(ctx){ ctx.n++; return javaName('area'+(ctx.n>1?ctx.n:''),ctx.used); }
+function labEmitVar(node,ctx){
+  if(node.ref!==undefined){
+    var v=labTemp(ctx);
+    ctx.code+='Area '+v+' = new Area('+ctx.names[node.ref]+');\n';
+    return v;
+  }
+  var lv=labEmitVar(node.l,ctx);
+  var arg=labEmitArg(node.r,ctx);      // its own code has to land before the call
+  ctx.code+=lv+'.'+node.op+'('+arg+');\n';
+  return lv;
+}
+function labEmitArg(node,ctx){
+  if(node.ref!==undefined) return 'new Area('+ctx.names[node.ref]+')';
+  return labEmitVar(node,ctx);
+}
+function labJava(){
+  if(!LAB.ast) return '';
+  var keepFrc=USED_FRC;
+  try{
+    var used={},names=[],decl='';
+    var refs=labRefs(LAB.ast,[]).slice().sort(function(a,b){ return a-b; });
+    refs.forEach(function(i){
+      var l=LAB.shapes[i];
+      var v=javaName(l.name,used);
+      var d=declParts(v,l,false,g2n()+'.getFontRenderContext()');
+      decl+=d.field+d.build;
+      var bake=tfBake(v,l,null);       // the operand's own rotate / scale / shear
+      decl+=bake.code;
+      names[i]=bake.name;
+    });
+    var ctx={code:'',names:names,n:0,used:used};
+    var root=labEmitVar(LAB.ast,ctx);
+    return '// '+labText(LAB.ast)+'\n'+decl+'\n'+ctx.code
+      +'\n'+g2n()+'.fill('+root+');\n';
+  } finally { USED_FRC=keepFrc; }      // the sheet's own output owns that flag
+}
+
+/* ---- handing the result to the sheet ---- */
+
+// ((A op B) op C)... over operands that each appear once is the only shape the
+// sheet's layer chain can hold; anything nested has to go over as an outline
+function labChain(node){
+  var chain=[],seen={};
+  function walk(n){
+    if(n.ref!==undefined){ chain.unshift({ref:n.ref,op:null}); return true; }
+    if(n.r.ref===undefined) return false;
+    chain.unshift({ref:n.r.ref,op:n.op});
+    return walk(n.l);
+  }
+  if(!walk(node)) return null;
+  for(var i=0;i<chain.length;i++){
+    if(seen[chain[i].ref]) return null;
+    seen[chain[i].ref]=1;
+  }
+  return chain;
+}
+function labResultPts(){
+  var pts=[], R=function(v){ return parseFloat(roundTo(v,S.precision)); };
+  (LAB.rings||[]).forEach(function(r){
+    var ring=simplifyRing(r,0.06);     // the flattener leaves far more points than Java needs
+    if(ring.length<3) return;
+    ring.forEach(function(p,i){ pts.push({cmd:i?'line':'move',x:R(p.x),y:R(p.y)}); });
+  });
+  return pts;
+}
+function labInsertOutline(){
+  if(!LAB.ast||!LAB.rings||!LAB.rings.length){ toast('There is no result to insert'); return; }
+  var pts=labResultPts();
+  if(!pts.length){ toast('The result came out empty'); return; }
+  push();
+  var l=normalize(defaults(labText(LAB.ast),'path'));
+  l.pts=pts;
+  l.closed=true;
+  l.wind='evenodd';                    // holes, the way the sheet fills an Area
+  l.render='fill';
+  S.layers.push(l);
+  setSel([S.layers.length-1],S.layers.length-1);
+  S.sel=null; sync();
+  toast('Inserted the outline as "'+l.name+'"');
+}
+function labInsertOperands(){
+  if(!LAB.ast){ toast('Fix the expression first'); return; }
+  var chain=labChain(LAB.ast);
+  if(!chain){ toast('Only a flat left-to-right expression can go over as shapes'); return; }
+  push();
+  var added=[];
+  chain.forEach(function(step,k){
+    var c=normalize(JSON.parse(JSON.stringify(LAB.shapes[step.ref])));
+    delete c.labTag;
+    c.combine=k?step.op:'none';
+    S.layers.push(c);
+    added.push(S.layers.length-1);
+  });
+  setSel(added,added[0]);
+  S.sel=null; sync();
+  toast('Inserted '+added.length+' shapes, combined on the sheet');
+}
+
+/* ---- painting the scratch sheet ---- */
+
+function labFit(){
+  var host=labEl('slSheet'), cv=labEl('slCanvas');
+  var aw=Math.max(60,host.clientWidth-18), ah=Math.max(60,host.clientHeight-18);
+  var sc=Math.min(aw/S.W,ah/S.H);
+  if(!isFinite(sc)||sc<=0) sc=1;
+  LAB.scale=sc;
+  var dpr=window.devicePixelRatio||1;
+  var cw=Math.max(1,Math.round(S.W*sc)), ch=Math.max(1,Math.round(S.H*sc));
+  cv.style.width=cw+'px'; cv.style.height=ch+'px';
+  cv.width=Math.round(cw*dpr); cv.height=Math.round(ch*dpr);
+  var c=cv.getContext('2d');
+  c.setTransform(dpr*sc,0,0,dpr*sc,0,0);
+  return c;
+}
+function labHandles(i){
+  var l=LAB.shapes[i]; if(!l) return [];
+  var b=layerBox(l); if(!b) return [];
+  return [{k:'nw',x:b.x0,y:b.y0},{k:'ne',x:b.x1,y:b.y0},
+          {k:'se',x:b.x1,y:b.y1},{k:'sw',x:b.x0,y:b.y1}];
+}
+function labPaint(){
+  if(!LAB.on) return;
+  var c=labFit(), z=LAB.scale, x, y;
+  c.clearRect(0,0,S.W,S.H);
+  c.fillStyle='#ffffff'; c.fillRect(0,0,S.W,S.H);
+
+  if(S.showGrid&&S.grid>0&&S.grid*z>3){
+    c.save();
+    c.lineWidth=1/z;
+    c.strokeStyle=rgba(S.gridColor,0.55*S.gridOpacity);
+    c.beginPath();
+    for(x=S.grid;x<S.W;x+=S.grid){ c.moveTo(x,0); c.lineTo(x,S.H); }
+    for(y=S.grid;y<S.H;y+=S.grid){ c.moveTo(0,y); c.lineTo(S.W,y); }
+    c.stroke();
+    c.restore();
+  }
+
+  // the operands are drawn from the very rings the solver reads, so what you
+  // see outlined is exactly what the expression is working on
+  var mem=labMembers();
+  if(LAB.ghost){
+    c.save();
+    c.setLineDash([5/z,4/z]);
+    c.lineWidth=1/z;
+    LAB.shapes.forEach(function(l,i){
+      if(!mem[i]) return;
+      c.strokeStyle=rgba(labColor(i),i===LAB.sel?0.95:0.5);
+      c.stroke(mem[i].path);
+    });
+    c.setLineDash([]);
+    c.font=(11/z)+'px "IBM Plex Mono", monospace';
+    c.textBaseline='alphabetic';
+    LAB.shapes.forEach(function(l,i){
+      var b=layerBox(l); if(!b) return;
+      c.fillStyle=labColor(i);
+      c.fillText(l.labTag,b.x0,Math.max(11/z,b.y0-4/z));
+    });
+    c.restore();
+  }
+
+  if(LAB.rings&&LAB.rings.length){
+    var p=ringsToPath(LAB.rings);
+    c.save();
+    c.fillStyle=rgba('#b02f4c',0.22);
+    c.fill(p,'evenodd');
+    c.strokeStyle='#b02f4c';
+    c.lineWidth=1.6/z;
+    c.stroke(p);
+    c.restore();
+  }
+
+  var sb=LAB.shapes[LAB.sel]&&layerBox(LAB.shapes[LAB.sel]);
+  if(sb){
+    c.save();
+    c.strokeStyle=rgba('#17242b',0.35);
+    c.lineWidth=1/z;
+    c.setLineDash([3/z,3/z]);
+    c.strokeRect(sb.x0,sb.y0,sb.x1-sb.x0,sb.y1-sb.y0);
+    c.setLineDash([]);
+    var r=4.5/z;
+    c.lineWidth=1.2/z;
+    labHandles(LAB.sel).forEach(function(h){
+      c.fillStyle='#ffffff'; c.strokeStyle='#17242b';
+      c.beginPath(); c.rect(h.x-r,h.y-r,r*2,r*2); c.fill(); c.stroke();
+    });
+    c.restore();
+  }
+
+  c.save();
+  c.strokeStyle=rgba('#17242b',0.5);
+  c.lineWidth=1/z;
+  c.strokeRect(0.5/z,0.5/z,S.W-1/z,S.H-1/z);
+  c.restore();
+}
+
+/* ---- the panels around it ---- */
+
+function labKindTag(l){
+  if(l.kind!=='path') return l.kind;
+  return polygonal(l)?(l.pts.length+'-gon'):'path';
+}
+function labAttr(s){ return esc(String(s)).replace(/"/g,'&quot;'); }
+function labRenderList(){
+  var host=labEl('slList');
+  if(!LAB.shapes.length){
+    host.innerHTML='<div class="empty">Nothing here yet. Add a shape below, '
+      +'or copy the sheet’s selection in.</div>';
+    return;
+  }
+  host.innerHTML=LAB.shapes.map(function(l,i){
+    return '<div class="slrow'+(i===LAB.sel?' on':'')+'" data-i="'+i+'">'
+      +'<span class="sltag" style="background:'+labColor(i)+'">'+esc(l.labTag)+'</span>'
+      +'<span class="nm">'+esc(l.name)+'</span>'
+      +'<span class="kd">'+esc(labKindTag(l))+'</span>'
+      +'<button type="button" class="x" data-del="'+i+'" title="Remove this operand">×</button>'
+      +'</div>';
+  }).join('');
+}
+function labNum(k,label,v,step){
+  return '<div class="field"><label>'+label+'</label>'
+    +'<input type="number" data-k="'+k+'" value="'+v+'" step="'+(step||1)+'"></div>';
+}
+function labRenderProps(){
+  var host=labEl('slProps'), l=LAB.shapes[LAB.sel];
+  if(!l){ host.innerHTML=''; return; }
+  var g=l.g, h='';
+  h+='<div class="row"><div class="field"><label>Name (Java variable)</label>'
+    +'<input type="text" data-k="name" value="'+labAttr(l.name)+'"></div></div>';
+  if(l.kind==='text'){
+    h+='<div class="row"><div class="field"><label>Text</label>'
+      +'<input type="text" data-k="text.s" value="'+labAttr(l.text.s)+'"></div></div>';
+    h+='<div class="row">'+labNum('text.x','x',l.text.x)+labNum('text.y','baseline y',l.text.y)
+      +labNum('text.size','size',l.text.size)+'</div>';
+  } else if(l.kind==='path'){
+    var b=layerBounds(l);
+    h+='<p class="note">'+l.pts.length+' points, '
+      +(b?Math.round(b.x1-b.x0)+' × '+Math.round(b.y1-b.y0):'empty')
+      +'. Drag it on the sheet, or pull a corner to resize.</p>';
+  } else {
+    h+='<div class="row">'+labNum('g.x','x',g.x)+labNum('g.y','y',g.y)+'</div>';
+    h+='<div class="row">'+labNum('g.w','w',g.w)+labNum('g.h','h',g.h)+'</div>';
+    if(l.kind==='rect')
+      h+='<div class="row">'+labNum('g.rx','arc w',g.rx)+labNum('g.ry','arc h',g.ry)+'</div>';
+    if(l.kind==='arc'){
+      h+='<div class="row">'+labNum('g.start','start°',g.start,5)
+        +labNum('g.extent','extent°',g.extent,5)+'</div>';
+      h+='<div class="row"><div class="field"><label>Arc type</label><select data-k="g.arcType">'
+        +['PIE','CHORD','OPEN'].map(function(t){
+            return '<option value="'+t+'"'+(g.arcType===t?' selected':'')+'>'+t+'</option>';
+          }).join('')
+        +'</select></div></div>';
+    }
+  }
+  h+='<div class="row">'+labNum('tf.rot','rotate°',l.tf.rot,5)
+    +'<div class="field"><label>Winding</label><select data-k="wind">'
+    +'<option value="nonzero"'+(l.wind==='nonzero'?' selected':'')+'>nonzero</option>'
+    +'<option value="evenodd"'+(l.wind==='evenodd'?' selected':'')+'>evenodd</option>'
+    +'</select></div></div>';
+  host.innerHTML=h;
+}
+function labRenderOut(){
+  var stat=labEl('slStat'), note=labEl('slInsNote');
+  labEl('slErr').textContent=LAB.err;
+  stat.classList.toggle('bad',!!LAB.err);
+  if(LAB.err) stat.textContent='no result';
+  else if(!LAB.rings) stat.textContent='—';
+  else if(!LAB.rings.length) stat.textContent=labText(LAB.ast)+'  →  empty';
+  else {
+    var n=LAB.rings.reduce(function(a,r){ return a+r.length; },0);
+    stat.textContent=labText(LAB.ast)+'  →  '+LAB.rings.length
+      +(LAB.rings.length===1?' ring, ':' rings, ')+n+' points';
+  }
+  var blank=labEmptyOperands();
+  if(blank.length&&!LAB.err)
+    stat.textContent+='   ·  '+blank.join(', ')+(blank.length===1?' is empty':' are empty');
+
+  var java='';
+  try{ java=labJava(); }catch(e){ java=''; }
+  labEl('slCode').innerHTML=java?highlight(java):'';
+
+  var chain=LAB.ast?labChain(LAB.ast):null;
+  labEl('slInsertOps').disabled=!chain;
+  labEl('slInsert').disabled=!(LAB.rings&&LAB.rings.length);
+  note.textContent = !LAB.ast ? ''
+    : chain ? 'Either button works here: the outline lands as one path, the operands land as '
+        +chain.length+' shapes the sheet combines for you.'
+    : 'This expression is nested, so the sheet’s top-to-bottom chain cannot hold it. '
+        +'Insert the result outline instead.';
+}
+function labChanged(){
+  labSolve();
+  labRenderList();
+  labRenderProps();
+  labRenderOut();
+  labPaint();
+  scheduleSave();
+}
+// a live drag only needs the parts that move
+function labTouched(){
+  labSolve(); labRenderOut(); labPaint();
+}
+
+/* ---- lab-local undo: sheet history has no business holding scratch work ---- */
+
+function labSnapshot(){
+  return JSON.stringify({shapes:LAB.shapes,expr:LAB.expr,sel:LAB.sel});
+}
+function labPush(){
+  LABHIST.push(labSnapshot());
+  if(LABHIST.length>40) LABHIST.shift();
+}
+function labUndo(){
+  if(!LABHIST.length){ toast('Nothing to undo in the lab'); return; }
+  try{
+    var d=JSON.parse(LABHIST.pop());
+    LAB.shapes=(d.shapes||[]).map(normalize);
+    LAB.expr=d.expr||'';
+    LAB.sel=(d.sel===undefined)?-1:d.sel;
+    labEl('slExpr').value=LAB.expr;
+    labChanged();
+  }catch(e){}
+}
+
+/* ---- pointer work on the scratch sheet ---- */
+
+function labPoint(ev){
+  var r=labEl('slCanvas').getBoundingClientRect();
+  return {x:(ev.clientX-r.left)/LAB.scale, y:(ev.clientY-r.top)/LAB.scale};
+}
+function labSnapV(v){ return (LAB.snap&&S.grid>0)?Math.round(v/S.grid)*S.grid:Math.round(v); }
+function labHitHandle(p){
+  if(LAB.sel<0) return null;
+  var tol=7/LAB.scale, hs=labHandles(LAB.sel);
+  for(var i=0;i<hs.length;i++)
+    if(Math.abs(p.x-hs[i].x)<=tol&&Math.abs(p.y-hs[i].y)<=tol) return hs[i];
+  return null;
+}
+function labHitShape(p){
+  var mem=labMembers();
+  for(var i=LAB.shapes.length-1;i>=0;i--)
+    if(mem[i]&&pointInMember(mem[i],p.x,p.y)) return i;
+  return -1;
+}
+labEl('slCanvas').addEventListener('pointerdown',function(e){
+  if(e.button!==0) return;
+  var p=labPoint(e), h=labHitHandle(p);
+  if(h){
+    var l=LAB.shapes[LAB.sel], b=layerBox(l);
+    // the corner opposite the grip stays put, as it does on the sheet
+    var pv={x:(h.k==='nw'||h.k==='sw')?b.x1:b.x0,
+            y:(h.k==='nw'||h.k==='ne')?b.y1:b.y0};
+    labPush();
+    LAB.drag={mode:'scale',i:LAB.sel,pivot:pv,start:p,base:scaleBase(l)};
+    try{ this.setPointerCapture(e.pointerId); }catch(err){}
+    e.preventDefault();
+    return;
+  }
+  var hit=labHitShape(p);
+  if(hit<0){ LAB.sel=-1; labRenderList(); labRenderProps(); labPaint(); return; }
+  LAB.sel=hit;
+  labPush();
+  LAB.drag={mode:'move',i:hit,origin:p,last:{x:0,y:0}};
+  try{ this.setPointerCapture(e.pointerId); }catch(err){}
+  labRenderList(); labRenderProps(); labPaint();
+  e.preventDefault();
+});
+labEl('slCanvas').addEventListener('pointermove',function(e){
+  var d=LAB.drag; if(!d) return;
+  var p=labPoint(e), l=LAB.shapes[d.i];
+  if(!l) return;
+  if(d.mode==='move'){
+    var dx=labSnapV(p.x-d.origin.x), dy=labSnapV(p.y-d.origin.y);
+    if(dx===d.last.x&&dy===d.last.y) return;
+    shiftLayer(l,dx-d.last.x,dy-d.last.y);
+    d.last={x:dx,y:dy};
+  } else {
+    // rewind to the numbers the drag started from, so nothing compounds
+    var sx=d.start.x-d.pivot.x, sy=d.start.y-d.pivot.y;
+    var fx=Math.abs(sx)<1e-6?1:(labSnapV(p.x)-d.pivot.x)/sx;
+    var fy=Math.abs(sy)<1e-6?1:(labSnapV(p.y)-d.pivot.y)/sy;
+    if(e.shiftKey){
+      var u=Math.max(Math.abs(fx),Math.abs(fy));
+      fx=u; fy=u;
+    }
+    scaleRestore(l,d.base);
+    scaleLayer(l,scaleFactor(Math.abs(fx)),scaleFactor(Math.abs(fy)),d.pivot,'geom');
+  }
+  labTouched();
+});
+function labEndDrag(){
+  if(!LAB.drag) return;
+  LAB.drag=null;
+  labRenderProps();
+  labChanged();
+}
+labEl('slCanvas').addEventListener('pointerup',labEndDrag);
+labEl('slCanvas').addEventListener('pointercancel',labEndDrag);
+
+/* ---- wiring ---- */
+
+labEl('slLeft').addEventListener('click',function(e){
+  var b=e.target.closest('[data-add]');
+  if(b){ labAdd(b.dataset.add); return; }
+  var del=e.target.closest('[data-del]');
+  if(del){ labRemove(+del.dataset.del); return; }
+  var row=e.target.closest('.slrow');
+  if(!row) return;
+  LAB.sel=+row.dataset.i;
+  labRenderList(); labRenderProps(); labPaint();
+});
+labEl('slPull').onclick=labPull;
+
+labEl('slProps').addEventListener('input',function(e){
+  var t=e.target, k=t.dataset.k, l=LAB.shapes[LAB.sel];
+  if(!k||!l||t.tagName==='SELECT') return;
+  var v=(t.type==='number')?parseFloat(t.value):t.value;
+  if(t.type==='number'&&!isFinite(v)) return;
+  if(k==='name'){ l.name=t.value; labRenderList(); }
+  else {
+    var part=k.split('.');
+    if(part[0]==='g') l.g[part[1]]=(part[1]==='w'||part[1]==='h')?Math.max(1,v):v;
+    else if(part[0]==='text') l.text[part[1]]=(part[1]==='s')?t.value:v;
+    else if(part[0]==='tf') l.tf[part[1]]=v;
+  }
+  labTouched();
+  scheduleSave();
+});
+labEl('slProps').addEventListener('change',function(e){
+  var t=e.target, k=t.dataset.k, l=LAB.shapes[LAB.sel];
+  if(t.tagName!=='SELECT'||!k||!l) return;
+  if(k==='wind') l.wind=t.value;
+  else if(k==='g.arcType') l.g.arcType=t.value;
+  labChanged();
+});
+
+labEl('slExpr').addEventListener('input',function(){
+  LAB.expr=this.value;
+  labTouched();
+  scheduleSave();
+});
+labEl('slOps').addEventListener('click',function(e){
+  var b=e.target.closest('[data-ins]'); if(!b) return;
+  var ta=labEl('slExpr'), s=ta.selectionStart, t=ta.selectionEnd;
+  var ins=b.dataset.ins, pad=(ins==='('||ins===')')?ins:' '+ins+' ';
+  ta.value=ta.value.slice(0,s)+pad+ta.value.slice(t);
+  ta.selectionStart=ta.selectionEnd=s+pad.length;
+  ta.focus();
+  LAB.expr=ta.value;
+  labTouched();
+  scheduleSave();
+});
+labEl('slGhost').onchange=function(){ LAB.ghost=this.checked; labPaint(); };
+labEl('slSnap').onchange=function(){ LAB.snap=this.checked; };
+labEl('slInsert').onclick=labInsertOutline;
+labEl('slInsertOps').onclick=labInsertOperands;
+labEl('slCopy').onclick=function(){
+  var txt='';
+  try{ txt=labJava(); }catch(e){}
+  if(!txt.trim()){ toast('Nothing to copy yet'); return; }
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(function(){ toast('Java copied'); },
+      function(){ toast('Select the code and copy manually'); });
+  else toast('Select the code and copy manually');
+};
+
+function labPlace(){
+  var el=labEl('setlab'), r=el.getBoundingClientRect();
+  if(!LAB.pos) LAB.pos={x:Math.max(8,(window.innerWidth-r.width)/2),
+                        y:Math.max(8,(window.innerHeight-r.height)/2)};
+  LAB.pos.x=Math.min(LAB.pos.x,Math.max(8,window.innerWidth-r.width-8));
+  LAB.pos.y=Math.min(LAB.pos.y,Math.max(8,window.innerHeight-r.height-8));
+  el.style.left=Math.max(8,LAB.pos.x)+'px';
+  el.style.top=Math.max(8,LAB.pos.y)+'px';
+}
+function showSetLab(on){
+  LAB.on=(on===undefined)?!LAB.on:!!on;
+  labEl('setlab').classList.toggle('on',LAB.on);
+  if(!LAB.on) return;
+  labEl('slGhost').checked=LAB.ghost;
+  labEl('slSnap').checked=LAB.snap;
+  // an empty lab demonstrates nothing, so seed it with something to try
+  if(!LAB.shapes.length){
+    LAB.expr='A − B';
+    labAdd('rect'); labAdd('ellipse');
+  }
+  labEl('slExpr').value=LAB.expr;
+  labChanged();
+  labPlace();
+  requestAnimationFrame(function(){ labPaint(); labPlace(); });
+}
+labEl('slClose').onclick=function(){ showSetLab(false); };
+labEl('openSetLab').onclick=function(){ MENUCLOSE(); showSetLab(true); };
+window.addEventListener('resize',function(){ if(LAB.on){ labPaint(); labPlace(); } });
+
+labEl('slHead').addEventListener('pointerdown',function(e){
+  if(e.button!==0||e.target.closest('button,label,input')) return;
+  var head=this, el=labEl('setlab'), r=el.getBoundingClientRect();
+  var off={x:e.clientX-r.left,y:e.clientY-r.top};
+  head.classList.add('drag');
+  try{ head.setPointerCapture(e.pointerId); }catch(err){}
+  function move(ev){ LAB.pos={x:ev.clientX-off.x,y:ev.clientY-off.y}; labPlace(); }
+  function up(){
+    head.classList.remove('drag');
+    head.removeEventListener('pointermove',move);
+    head.removeEventListener('pointerup',up);
+    head.removeEventListener('pointercancel',up);
+  }
+  head.addEventListener('pointermove',move);
+  head.addEventListener('pointerup',up);
+  head.addEventListener('pointercancel',up);
+});
+
+// the lab holds the keyboard while the pointer is in it, or Delete hits the sheet
+document.addEventListener('keydown',function(e){
+  if(!LAB.on) return;
+  if(e.key==='Escape'){ showSetLab(false); return; }
+  if(!(e.target&&e.target.closest&&e.target.closest('#setlab'))) return;
+  var k=e.key.toLowerCase();
+  if((e.ctrlKey||e.metaKey)&&k==='z'){ e.preventDefault(); e.stopPropagation(); labUndo(); return; }
+  if(/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  if((k==='delete'||k==='backspace')&&LAB.sel>=0){
+    e.preventDefault(); e.stopPropagation(); labRemove(LAB.sel);
+  }
+},true);
 
 /* ================= boot ================= */
 
@@ -4271,6 +6160,9 @@ S.layers.push(normalize(defaults('path 1','path')));
 S.active=0; S.selLayers=[0];
 setTool('line');
 showTab('shape');
+syncSheetUI();
+syncPrecisionUI();
+syncMeasures();
 sync();
 
 if(S.remember) restoreSession();
