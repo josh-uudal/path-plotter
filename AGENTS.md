@@ -21,9 +21,14 @@ maintaining a second copy. The user's current instructions take precedence.
 - `assets/js/core/geometry.js`: geometry shared by rendering and Java generation.
 - `assets/js/core/scene.js`: paint ordering, boolean runs, and clip ownership.
 - `assets/js/core/history.js`: snapshot history, with UI updates passed as callbacks.
+- `assets/js/core/path-editing.js`: pen segments, smooth/corner nodes, linked handles.
+- `assets/js/core/edit-actions.js`: keyboard nudge gestures and history boundaries.
+- `assets/js/canvas/snapping.js`: drawing/move snap resolution with injected geometry.
+- `assets/js/project/`: project validation and browser storage; keep imports atomic.
 - `assets/js/codegen/java2d.js`: source generation; receives state, geometry, scene
   helpers, and output-option callbacks. Do not read the DOM in this module.
-- `assets/js/ui/code-output.js`: escaping and highlighting generated source.
+- `assets/js/ui/code-output.js`: escaping, highlighting, and source-to-shape mapping.
+- `assets/js/ui/workspace.js`: workspace controls, focus, and edit-session wiring.
 - `assets/js/main.js`: canvas rendering, interaction, panels, persistence, rulers,
   set operation lab, and boot. See `docs/architecture.md` before extracting more.
 - `assets/css/`: base, layout, and editor rules, in that cascade order.
@@ -51,11 +56,14 @@ introduce eval-based module loading. Preserve existing behavior during extractio
   `data-idx`, never its DOM position, as the model index.
 - Selection currently always contains at least one active layer. Preserve this
   invariant until an explicitly scoped selection change addresses all callers.
-- Record `push()` before a drawing mutation. Current snapshots cover layers,
-  selection, sheet size, and measurements; they are not full project snapshots.
+- Record `push()` before a drawing mutation. Main supplies a full serializable
+  project snapshot, so undo of an import also restores settings and image assets.
+- Pen points may have `smooth`, `outX`, and `outY` metadata. Move, scale, flip,
+  split, and clone operations must preserve the intended outgoing tangent.
 - `sync()` updates selection, layers, properties, rail, measurements, Java, canvas,
   and scheduled persistence. A lighter update path must handle its own history
-  and saving requirements. Keyboard nudging currently misses history.
+  and saving requirements. Repeated arrow events form one undo gesture; keyup,
+  blur, or another editing action ends it.
 - Group ids must come from `nextGroupId()` so imported groups and pasted groups
   do not collide.
 
@@ -83,8 +91,11 @@ introduce eval-based module loading. Preserve existing behavior during extractio
   Add persistent drawing fields to both; transient drags do not belong there.
 - Preserve existing project files and the `pathPlotter/session@1` and
   `pathPlotter/remember@1` storage keys. Version new formats and migrate old ones.
-- Images can exceed localStorage capacity; the existing fallback drops image
-  data. This is a known limitation, not a guarantee of complete recovery.
+- Session storage prefers IndexedDB and reads the existing localStorage key for
+  migration/fallback. Quota failures must report partial or failed saves, never
+  claim that missing images are saved. Full JSON downloads embed all available assets.
+- Validate project data before mutating state. Schema 9 reads prior projects;
+  legacy clip migration applies only to projects older than schema 8.
 
 ## Conventions and collaboration
 

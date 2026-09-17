@@ -35,6 +35,34 @@ function highlight(src){
 }
 
 
-root.codeOutput={esc:esc,highlight:highlight};
+function mapLines(text,groups,layers){
+  var lines=text.split('\n').map(function(t){ return {text:t,layers:[],point:null}; });
+  groups.forEach(function(group){
+    ['fields','build','paint'].forEach(function(part){
+      var block=group[part].replace(/^\n+|\n+$/g,'').split('\n');
+      if(!block[0]) return;
+      for(var i=0;i<=lines.length-block.length;i++){
+        if(!block.every(function(t,j){ return lines[i+j].text.trim()===t.trim(); })) continue;
+        var point=0, single=group.layers.length===1&&layers[group.layers[0]].kind==='path';
+        block.forEach(function(t,j){
+          lines[i+j].layers=group.layers;
+          if(single&&/\.(moveTo|lineTo|quadTo|curveTo)\(/.test(t)) lines[i+j].point=point++;
+        });
+        break;
+      }
+    });
+  });
+  return lines;
+}
+function render(text,groups,state){
+  return mapLines(text,groups,state.layers).map(function(line){
+    var selected=line.layers.some(function(i){return state.selLayers.indexOf(i)>=0;});
+    var point=selected&&state.sel&&line.point===state.sel.i;
+    var attrs=line.layers.length?' data-layer="'+line.layers[0]+'"':'';
+    if(line.point!==null) attrs+=' data-point="'+line.point+'"';
+    return '<span class="code-line'+(selected?' code-selected':'')+(point?' code-point':'')+'"'+attrs+'>'+highlight(line.text)+'</span>';
+  }).join('');
+}
+root.codeOutput={esc:esc,highlight:highlight,mapLines:mapLines,render:render};
 
 })(window.PathPlotter = window.PathPlotter || {});

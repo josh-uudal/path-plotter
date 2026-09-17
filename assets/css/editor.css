@@ -357,14 +357,4 @@ pre#slCode{flex:1;min-height:110px;overflow:auto;margin:0;padding:9px 10px;backg
   #slMid{min-height:320px}
 }
 
-@media (max-width:920px){
-  #shell{flex-direction:column;overflow:auto}
-  #rail{width:auto;flex-direction:row;padding:6px 8px;overflow-x:auto;order:1}
-  #rail .sep{width:1px;height:26px;margin:0 6px}
-  #rail .grow{display:none}
-  #centre{order:2;height:58vh;flex:none}
-  #side{order:3;width:auto!important;border-left:0;border-top:1px solid var(--edge);height:auto}
-  #sideResize,#stackResize{display:none}
-  #stackwrap{height:auto!important;min-height:200px}
-}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

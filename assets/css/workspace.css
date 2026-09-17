@@ -1,0 +1,90 @@
+/* Editing controls stay reachable while tools and properties scroll separately. */
+header{gap:9px;height:54px;padding:0 12px}
+header h1{letter-spacing:.09em}
+header .readout{display:none}
+#historyActions{display:flex;gap:4px}
+.iconAction{display:flex;align-items:center;justify-content:center;min-width:32px;min-height:32px}
+.iconAction svg{width:17px;height:17px}
+#rail{width:64px;scrollbar-width:thin;padding:8px 4px;gap:3px}
+#rail::-webkit-scrollbar{display:block;width:5px}
+#rail .tool{width:48px;height:45px;flex-direction:column;gap:1px}
+#rail .tool svg{width:18px;height:18px}
+.tool-caption{font:9px "IBM Plex Sans",sans-serif;line-height:12px}
+#rail .sep{margin:3px 0}
+#canvasBar,#pathBar{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--edge);min-height:39px;flex-shrink:0}
+#canvasBar .spacer{flex:1}
+#selectionInfo{font-size:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:40%}
+.compactCheck{display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;cursor:pointer}
+.compactCheck input{accent-color:var(--plot)}
+#pathBar{padding-top:5px;padding-bottom:5px;gap:6px;min-height:36px}
+#pathBar .note{margin:0 0 0 5px}
+#canvasBar .act,#pathBar .act{font:12px "IBM Plex Sans",sans-serif;padding:4px 9px}
+#statusbar{opacity:1;white-space:normal;align-items:flex-start;max-width:min(640px,calc(100% - 20px));font-size:12px;padding:6px 9px}
+#statusbar .stag{padding-top:1px}
+#hint{min-width:0}
+#side{width:330px;max-width:48vw}
+#tabs{flex-wrap:wrap}
+#tabs button{font-family:"IBM Plex Sans",sans-serif;letter-spacing:0;text-transform:none;font-size:12px;padding:10px 4px}
+.advanced summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--ink);padding:3px 0}
+.advanced:not(.group){margin-top:12px;border-top:1px solid var(--edge);padding-top:8px}
+.advanced[open]>summary{margin-bottom:8px}
+.inspector-hidden #side{display:none}
+#drawer{height:235px;max-height:55vh}
+#drawer .bar{height:42px;min-height:42px;gap:8px;padding:0 10px}
+#drawer.shut{height:42px}
+#drawerToggle{border:0;background:transparent;padding:4px 0;font-size:11px;white-space:nowrap}
+#drawer .bar .chev{display:none}
+#drawerToggle::before{content:'▾';margin-right:7px}
+#drawer.shut #drawerToggle::before{content:'▸'}
+#codeBody{min-height:0;display:flex;flex:1;flex-direction:column;overflow:hidden}
+#drawer.shut #codeBody{display:none}
+#codeTools{display:flex;gap:8px;align-items:center;padding:4px 12px;flex-wrap:wrap;font-size:12px}
+#codeTools select{max-width:155px;padding:3px;border:1px solid var(--edge);border-radius:3px;background:white;color:var(--ink)}
+#codeTools .act{font-size:11px;padding:3px 7px}
+#codeTools .note{margin:0}
+#exportNote{margin:0;padding:2px 12px 6px;font-size:11px}
+#exportHelp{flex-shrink:0;max-height:130px;overflow:auto}
+#exportHelp summary{cursor:pointer;font-size:11px;color:var(--ink-soft);padding:2px 12px 5px}
+#assetDownloads{display:flex;gap:8px;padding:0 12px;font-size:11px;flex-wrap:wrap}
+#assetDownloads:empty{display:none}
+pre#code{flex:1;min-height:0;overflow:auto;padding:3px 0 12px;font-size:12px;width:auto;line-height:1.7}
+.code-line{display:block;padding:0 14px;border-left:3px solid transparent;min-height:1.7em;min-width:100%;width:max-content}
+.code-line[data-layer]{cursor:pointer}
+.code-line[data-layer]:hover{background:#e9eee4}
+.code-selected{background:#e8eee3;border-left-color:#879881}
+.code-point{background:#fae8ed;border-left-color:var(--plot)}
+.save-status{border:0;background:transparent;color:#40543f;font:11px "IBM Plex Sans",sans-serif;cursor:pointer;max-width:210px;text-align:left;padding:4px 6px}
+.save-status::before{content:'●';margin-right:5px;color:#55744b}
+.save-status[data-state="saving"]::before{color:#91712d}
+.save-status[data-state="error"],.save-status[data-state="partial"]{background:#fce5e7;color:#8b2137;border-radius:4px}
+.save-status[data-state="error"]::before,.save-status[data-state="partial"]::before{color:#b02f4c}
+.save-status[data-state="off"]::before{color:#78818a}
+:is(button,input,select,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--plot);outline-offset:2px}
+.field input,.field select,.field textarea{border-color:#aebbac}
+.menupanel{max-height:calc(100dvh - 75px);overflow:auto;max-width:calc(100vw - 24px)}
+body.loading-project #shell{pointer-events:none;opacity:.6}
+@media(max-width:1050px){
+  header{gap:5px;padding:0 8px;flex-wrap:wrap;height:auto;min-height:54px;align-content:center;row-gap:4px}
+  header h1{font-size:11px}#menubar{height:34px}
+  .save-status{max-width:160px}
+  #drawer .bar{flex-wrap:wrap;height:auto;min-height:72px;padding:5px 10px;gap:5px}
+  #drawer.shut{height:42px}#drawer.shut .bar{min-height:42px;flex-wrap:nowrap}
+  #drawer.shut .bar>:not(#drawerToggle){display:none}
+  #drawer .bar .onceBox{font-size:11px}
+  #side{width:305px}
+}
+@media(max-width:760px){
+  #shell{position:relative}#side{position:absolute;right:0;top:0;bottom:0;z-index:20;width:330px!important;max-width:calc(100vw - 64px);box-shadow:-8px 0 20px #17242b22}
+  #sideResize{display:none}#rail{width:52px}#rail .tool{width:40px;height:43px}
+  header{min-height:92px}header .spacer{display:none}header h1{margin-right:auto}
+  header #menubar{order:5}header .zoomctl{order:6;margin-left:auto}
+  .save-status{flex:1;max-width:140px;font-size:10px}#toggleInspector{font-size:11px}
+  #canvasBar,#pathBar{padding-left:7px;padding-right:7px;gap:6px}
+  #selectionInfo{display:none}#canvasBar .spacer{display:none}#viewMode{margin-left:auto;font-size:11px!important}
+  #pathBar .note{display:none}#pathBar .act{padding:4px 8px}
+  #codeSelection{display:none}#drawer{height:245px}
+  #drawer .bar #outMode{width:156px!important}#drawer .bar .act{font-size:11px}
+  #statusbar{left:5px;bottom:5px;max-width:calc(100% - 10px);font-size:11px}#statusbar .stag{display:none}
+  .menupanel{position:fixed;top:94px;left:10px;right:10px;max-height:calc(100dvh - 110px)}
+}
+@media(max-height:600px){#drawer{height:165px}#statusbar{max-width:90%;font-size:11px}}

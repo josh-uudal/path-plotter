@@ -3,7 +3,7 @@
 
 root.createModel = function(PALETTE){
 var S={
-  W:600,H:450,grid:25,snap:true,showGrid:true,labels:true,aa:true,
+  W:600,H:450,grid:25,snap:true,objectSnap:true,showGrid:true,labels:true,aa:true,
   gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines',solidView:false,
   tool:'line', out:'frag',
   view:{z:1,x:0,y:0},
@@ -50,7 +50,7 @@ function polygonal(l){
 }
 function normalize(l){
   var d=defaults(l.name||'path',l.kind||'path');
-  var o=Object.assign(d,l);
+  var o=Object.assign({},d,l);
   o.g=Object.assign(d.g,l.g||{});
   o.text=Object.assign(d.text,l.text||{});
   o.img=Object.assign(d.img,l.img||{});

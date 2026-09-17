@@ -42,7 +42,9 @@ index.html                 Application markup and script loading order
 assets/css/                Base styles, workspace layout, editor controls
 assets/js/core/            Drawing state, geometry, history, layer/clip ordering
 assets/js/codegen/         Java2D source generation
-assets/js/ui/              Code-output formatting
+assets/js/ui/              Workspace controls and code-output formatting
+assets/js/canvas/          Drawing and movement snapping
+assets/js/project/         Import validation and browser session storage
 assets/js/main.js          Canvas, interactions, panels, persistence, feature wiring
 docs/                     Architecture notes
 examples/                 Openable sample projects
@@ -81,3 +83,20 @@ It is not needed to serve the app, run the checks, or run the tests.
 Both Codex and Claude Code should use [AGENTS.md](AGENTS.md). Keep shared guidance
 there; `CLAUDE.md` imports it to avoid divergent instructions. Existing local
 assistant settings are not required to build or preview the project.
+
+## Drawing and exporting
+
+- Pen (`F`): click corners and drag tangent handles for curves. Enter finishes;
+  Continue resumes the selected path. Close path joins the ends.
+- Select (`V`): edit anchors and handles. The inspector offers smooth/corner nodes
+  and line/curve conversion for the segment leading into an endpoint.
+- Snap uses grid and nearby object points; Objects toggles geometry snapping.
+  Hold the configured fine-placement key (Alt by default) to bypass both.
+- Transform groups scaling, alignment, flipping, and affine settings. Appearance
+  contains fill, stroke, and opacity. Edit view labels its selection dimming;
+  Preview shows the final composition without editor overlays.
+- Click a mapped code line to select its shape or point. Copy all output or just
+  fields, constructor setup, paint statements, or imports. Download .java always
+  exports a complete class; Integration notes lists required image downloads.
+- Autosave status is visible in the header. Click it to download a full JSON
+  backup. Browser recovery includes images when storage permits.

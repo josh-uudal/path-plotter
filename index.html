@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/layout.css">
 <link rel="stylesheet" href="assets/css/editor.css">
+<link rel="stylesheet" href="assets/css/workspace.css">
 </head>
 <body>
 
@@ -65,7 +66,7 @@
         </div>
         <div class="checks">
           <label><input type="checkbox" id="gridChk" checked> Show grid <kbd>G</kbd></label>
-          <label><input type="checkbox" id="snapChk" checked> Snap <kbd>S</kbd></label>
+          <label><input type="checkbox" id="snapChk" checked> Grid + object snap <kbd>S</kbd></label>
           <label><input type="checkbox" id="labelsChk" checked> Point labels</label>
           <label><input type="checkbox" id="aaChk" checked> Antialiasing</label>
           <label><input type="checkbox" id="solidChk"> True opacity <kbd>D</kbd></label>
@@ -132,12 +133,16 @@
         <div class="btns">
           <button class="act" id="forgetSession">Clear stored work</button>
         </div>
-        <p class="note">Your sheet is kept in this browser only, so a refresh or an accidental close will not lose it. It is not uploaded anywhere. Save a .json for a real backup or to move to another machine.</p>
+        <p class="note">Autosave keeps your work, including images, in this browser when storage is available. Check the save status above. Download a JSON backup to keep a separate copy or move to another machine.</p>
       </div>
     </div>
   </nav>
 
   <span class="spacer"></span>
+  <button class="save-status" id="saveStatus" title="Download a complete JSON backup"><span id="saveStatusText" role="status" aria-live="polite">Loading saved work…</span></button>
+  <div id="historyActions" aria-label="Editing actions"></div>
+  <button class="act primary" id="quickPreview" title="Preview the drawing (P)">Preview</button>
+  <button class="act" id="toggleInspector" aria-controls="side" aria-expanded="true">Inspector</button>
   <span class="readout" id="coords">·</span>
   <div class="zoomctl">
     <button id="zoomOut" title="Zoom out">−</button>
@@ -151,15 +156,29 @@
   <nav id="rail" aria-label="Tools"></nav>
 
   <div id="centre">
+    <div id="canvasBar" aria-label="Drawing controls">
+      <span id="selectionInfo">Empty path</span>
+      <span class="spacer"></span>
+      <label class="compactCheck"><input type="checkbox" id="quickSnap" checked> Snap</label>
+      <label class="compactCheck"><input type="checkbox" id="objectSnap" checked> Objects</label>
+      <button class="act" id="viewMode" aria-pressed="false" title="Toggle selection dimming (D)">Edit view</button>
+    </div>
+    <div id="pathBar" aria-label="Path actions">
+      <button class="act" id="newPath">New path</button>
+      <button class="act" id="finishPath" title="Finish drawing (Enter)">Finish</button>
+      <button class="act" id="closePath">Close path</button>
+      <button class="act" id="continuePath">Continue</button>
+      <span id="pathState" class="note"></span>
+    </div>
     <div id="stage">
-      <canvas id="board"></canvas>
+      <canvas id="board" tabindex="0" aria-label="Drawing canvas. Choose a tool to draw. Arrow keys move the selection."></canvas>
       <div id="statusbar"><span class="stag" id="hintTag">tool</span><span id="hint"></span></div>
       <div id="dropzone">Drop the photo to trace it</div>
     </div>
     <div id="drawer">
       <div class="bar" id="drawerBar">
-        <span class="chev"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
-        <h2>Java output</h2>
+        <span class="chev" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
+        <button id="drawerToggle" class="act" aria-controls="codeBody" aria-expanded="true">Java output</button>
         <div class="seg" style="width:186px" id="outMode">
           <button data-o="frag" aria-pressed="true">fragment</button>
           <button data-o="full" aria-pressed="false">full class</button>
@@ -168,9 +187,21 @@
           <input type="checkbox" id="buildOnce" checked> build once
         </label>
         <span class="spacer"></span>
+        <button class="act" id="downloadJava">Download .java</button>
         <button class="act primary" id="copy" style="padding:5px 12px">Copy code</button>
       </div>
-      <pre id="code"></pre>
+      <div id="codeBody">
+        <div id="codeTools">
+          <label for="copyTarget">Copy</label>
+          <select id="copyTarget"><option value="all">All code</option><option value="fields">Class fields</option><option value="build">Constructor setup</option><option value="paint">Paint statements</option><option value="imports">Imports</option></select>
+          <button class="act" id="showCodeSelection">Find selection</button>
+          <span id="codeSelection" class="note">Click a code line to select its shape</span>
+        </div>
+        <details id="exportHelp"><summary id="exportSummary">Integration notes</summary>
+          <p class="note" id="exportNote"></p>
+          <div id="assetDownloads"></div>
+        </details>
+        <pre id="code" tabindex="0" aria-label="Generated Java code"></pre>
       <!-- shown instead of the code while the sheet is still empty -->
       <div id="blank" hidden>
         <div class="tb">
@@ -186,10 +217,11 @@
           </div>
         </div>
         <ol class="tbsteps">
-          <li>Pick a tool from the rail &mdash; <kbd>R</kbd> rectangle, <kbd>E</kbd> ellipse, <kbd>1</kbd> line</li>
+          <li>Choose <kbd>F</kbd> Pen for paths or <kbd>R</kbd> for rectangles</li>
           <li>Drag on the sheet to lay the shape down</li>
           <li>Java appears here, ready for your <code>JPanel</code></li>
         </ol>
+      </div>
       </div>
     </div>
   </div>
@@ -198,7 +230,8 @@
     <div id="sideResize" title="Drag to resize the panel"></div>
     <div id="tabs" role="tablist">
       <button role="tab" data-p="shape"  aria-selected="true">Shape</button>
-      <button role="tab" data-p="style"  aria-selected="false">Style</button>
+      <button role="tab" data-p="transform" aria-selected="false">Transform</button>
+      <button role="tab" data-p="style"  aria-selected="false">Appearance</button>
       <button role="tab" data-p="image"  aria-selected="false">Image</button>
       <button role="tab" data-p="ruler"  aria-selected="false">Ruler</button>
     </div>
@@ -211,6 +244,14 @@
           <h2>Geometry <span class="kindtag" id="kindTag">GeneralPath</span></h2>
 
           <div id="geoPath">
+            <p class="note">Use the Pen to click corners or drag smooth curves. Select an anchor to edit its handles.</p>
+            <div id="nodeActions" class="btns">
+              <button class="act" id="smoothNode">Smooth node</button><button class="act" id="cornerNode">Corner node</button>
+              <button class="act" id="curveSegment">Curve segment</button><button class="act" id="lineSegment">Straight segment</button>
+            </div>
+            <div id="pointActions" class="btns"></div>
+            <p class="note" id="nodeNote">Select a point on the canvas.</p>
+            <details class="advanced"><summary>Java path settings</summary>
             <div class="row">
               <div class="field"><label for="shapeClass">Java shape class</label>
                 <select id="shapeClass">
@@ -231,6 +272,7 @@
                 </select></div>
             </div>
             <p class="note" id="shapeClassNote"></p>
+            </details>
             <div id="ptRow" style="display:none">
               <span class="selinfo" id="ptLabel"></span>
               <div class="row">
@@ -317,23 +359,8 @@
           </div>
         </div>
 
-        <div class="group">
-          <h2>Transform</h2>
-          <div class="row">
-            <div class="field"><label for="trot">rotate°</label><input id="trot" type="number" step="5" value="0"></div>
-            <div class="field"><label for="tsx">scale x</label><input id="tsx" type="number" step="0.1" value="1"></div>
-            <div class="field"><label for="tsy">scale y</label><input id="tsy" type="number" step="0.1" value="1"></div>
-          </div>
-          <div class="row">
-            <div class="field"><label for="tshx">shear x</label><input id="tshx" type="number" step="0.05" value="0"></div>
-            <div class="field"><label for="tshy">shear y</label><input id="tshy" type="number" step="0.05" value="0"></div>
-            <div class="field"><button class="act" id="tfReset" style="width:100%">Reset</button></div>
-          </div>
-          <p class="note" id="tfNote">Applied about the shape's centre, then undone with <code>g2.setTransform</code>. Selection handles follow the transform.</p>
-        </div>
-
-        <div class="group">
-          <h2>Combine &amp; clip</h2>
+        <details class="group advanced">
+          <summary>Combine &amp; clip</summary>
           <div class="row">
             <div class="field"><label for="combine">Area operation against the shape below</label>
               <select id="combine">
@@ -349,9 +376,77 @@
             <label><input type="checkbox" id="clippedChk"> Clip to region above</label>
           </div>
           <p class="note" id="clipNote"></p>
-        </div>
+        </details>
       </div>
 
+
+      <div class="pane" data-pane="transform">
+        <div class="group">
+          <h2>Scale selection</h2>
+          <div class="seg" id="scaleMode">
+            <button data-sm="geom" aria-pressed="true">geometry</button>
+            <button data-sm="tf" aria-pressed="false">transform</button>
+          </div>
+          <div class="row">
+            <div class="field"><label for="scFx">&times; x</label><input id="scFx" type="number" step="0.1" min="0.02" value="1"></div>
+            <div class="field"><label for="scFy">&times; y</label><input id="scFy" type="number" step="0.1" min="0.02" value="1"></div>
+            <div class="field"><button class="act primary" id="scApply" style="width:100%">Apply</button></div>
+          </div>
+          <div class="btns three">
+            <button class="act" id="scHalf" title="Halve the selection">50%</button>
+            <button class="act" id="scUp" title="Grow the selection by a quarter">125%</button>
+            <button class="act" id="scDouble" title="Double the selection">200%</button>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" id="scLock" checked> Lock aspect</label>
+            <label><input type="checkbox" id="scEach"> Scale each in place</label>
+          </div>
+          <p class="note" id="scaleNote"></p>
+        </div>
+
+        <div class="group">
+          <h2>Arrange</h2>
+          <div class="btns">
+            <button class="act" id="flipH">Flip horizontal</button>
+            <button class="act" id="flipV">Flip vertical</button>
+            <button class="act" id="centreH">Centre across</button>
+            <button class="act" id="centreV">Centre down</button>
+          </div>
+          <p class="note">Flip and centre act on every selected shape at once.</p>
+        </div>
+
+        <div class="group">
+          <h2>Align &amp; distribute</h2>
+          <div class="btns three">
+            <button class="act" id="alignL" title="Align left edges">⇤ left</button>
+            <button class="act" id="alignC" title="Align horizontal centres">⇔ centre</button>
+            <button class="act" id="alignR" title="Align right edges">⇥ right</button>
+            <button class="act" id="alignT" title="Align top edges">⇡ top</button>
+            <button class="act" id="alignM" title="Align vertical middles">⇕ middle</button>
+            <button class="act" id="alignB" title="Align bottom edges">⇣ bottom</button>
+          </div>
+          <div class="btns">
+            <button class="act" id="distH" title="Even horizontal gaps between centres">Spread across</button>
+            <button class="act" id="distV" title="Even vertical gaps between centres">Spread down</button>
+          </div>
+          <p class="note" id="alignNote"></p>
+        </div>
+        <div class="group">
+          <h2>Transform</h2>
+          <div class="row">
+            <div class="field"><label for="trot">rotate°</label><input id="trot" type="number" step="5" value="0"></div>
+            <div class="field"><label for="tsx">scale x</label><input id="tsx" type="number" step="0.1" value="1"></div>
+            <div class="field"><label for="tsy">scale y</label><input id="tsy" type="number" step="0.1" value="1"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label for="tshx">shear x</label><input id="tshx" type="number" step="0.05" value="0"></div>
+            <div class="field"><label for="tshy">shear y</label><input id="tshy" type="number" step="0.05" value="0"></div>
+            <div class="field"><button class="act" id="tfReset" style="width:100%">Reset</button></div>
+          </div>
+          <p class="note" id="tfNote">Applied about the shape's centre, then undone with <code>g2.setTransform</code>. Selection handles follow the transform.</p>
+        </div>
+
+      </div>
 
       <!-- ============ RULER ============ -->
       <div class="pane" data-pane="ruler">
@@ -473,56 +568,6 @@
           <p class="note" id="strokeNote"></p>
         </div>
 
-        <div class="group">
-          <h2>Scale selection</h2>
-          <div class="seg" id="scaleMode">
-            <button data-sm="geom" aria-pressed="true">geometry</button>
-            <button data-sm="tf" aria-pressed="false">transform</button>
-          </div>
-          <div class="row">
-            <div class="field"><label for="scFx">&times; x</label><input id="scFx" type="number" step="0.1" min="0.02" value="1"></div>
-            <div class="field"><label for="scFy">&times; y</label><input id="scFy" type="number" step="0.1" min="0.02" value="1"></div>
-            <div class="field"><button class="act primary" id="scApply" style="width:100%">Apply</button></div>
-          </div>
-          <div class="btns three">
-            <button class="act" id="scHalf" title="Halve the selection">50%</button>
-            <button class="act" id="scUp" title="Grow the selection by a quarter">125%</button>
-            <button class="act" id="scDouble" title="Double the selection">200%</button>
-          </div>
-          <div class="checks">
-            <label><input type="checkbox" id="scLock" checked> Lock aspect</label>
-            <label><input type="checkbox" id="scEach"> Scale each in place</label>
-          </div>
-          <p class="note" id="scaleNote"></p>
-        </div>
-
-        <div class="group">
-          <h2>Arrange</h2>
-          <div class="btns">
-            <button class="act" id="flipH">Flip horizontal</button>
-            <button class="act" id="flipV">Flip vertical</button>
-            <button class="act" id="centreH">Centre across</button>
-            <button class="act" id="centreV">Centre down</button>
-          </div>
-          <p class="note">Flip and centre act on every selected shape at once.</p>
-        </div>
-
-        <div class="group">
-          <h2>Align &amp; distribute</h2>
-          <div class="btns three">
-            <button class="act" id="alignL" title="Align left edges">⇤ left</button>
-            <button class="act" id="alignC" title="Align horizontal centres">⇔ centre</button>
-            <button class="act" id="alignR" title="Align right edges">⇥ right</button>
-            <button class="act" id="alignT" title="Align top edges">⇡ top</button>
-            <button class="act" id="alignM" title="Align vertical middles">⇕ middle</button>
-            <button class="act" id="alignB" title="Align bottom edges">⇣ bottom</button>
-          </div>
-          <div class="btns">
-            <button class="act" id="distH" title="Even horizontal gaps between centres">Spread across</button>
-            <button class="act" id="distV" title="Even vertical gaps between centres">Spread down</button>
-          </div>
-          <p class="note" id="alignNote"></p>
-        </div>
       </div>
 
       <!-- ============ IMAGE ============ -->
@@ -534,7 +579,7 @@
             <button class="act" id="traceToLayer">Trace photo → layer</button>
           </div>
           <input type="file" id="imgNewFile" accept="image/*" hidden>
-          <p class="note">An image layer emits <code>g2.drawImage(…)</code>. The generated code reads the file by name, so keep it beside your class.</p>
+          <p class="note">An image layer emits <code>g2.drawImage(…)</code>. The generated code reads the file by name, so keep it in the Java process working directory.</p>
         </div>
 
         <div class="group">
@@ -593,7 +638,7 @@
 
 <div id="ctxmenu" role="menu"></div>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <div id="preview" role="dialog" aria-label="Window preview">
   <div id="pvHead">
@@ -689,12 +734,14 @@
   </div>
 </div>
 
-<div id="help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+<div role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" id="help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
   <div id="helpBox">
     <button class="act" id="helpClose">Close</button>
     <h3>Tools</h3>
     <table>
       <tr><td><kbd>V</kbd></td><td>Select: drag points, corners, or a whole shape</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Pen: click corners, drag smooth curves</td></tr>
+      <tr><td><kbd>Enter</kbd></td><td>Finish the current path; Continue resumes it</td></tr>
       <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Line, quadratic, cubic path segment</td></tr>
       <tr><td><kbd>R</kbd></td><td>Rectangle; set an arc width for RoundRectangle2D</td></tr>
       <tr><td><kbd>E</kbd></td><td>Ellipse</td></tr>
@@ -751,6 +798,12 @@
 <script src="assets/js/core/history.js"></script>
 <script src="assets/js/codegen/java2d.js"></script>
 <script src="assets/js/ui/code-output.js"></script>
+<script src="assets/js/core/path-editing.js"></script>
+<script src="assets/js/core/edit-actions.js"></script>
+<script src="assets/js/canvas/snapping.js"></script>
+<script src="assets/js/project/validation.js"></script>
+<script src="assets/js/project/session-store.js"></script>
+<script src="assets/js/ui/workspace.js"></script>
 <script src="assets/js/main.js"></script>
 </body>
 </html>

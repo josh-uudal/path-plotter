@@ -87,9 +87,13 @@ function jstr(s){
 var IMGVARS={}, USED_IMAGES=false, USED_FRC=false;
 function collectImages(used){
   IMGVARS={};
-  var out=[];
+  var out=[],files=Object.create(null);
   function add(src,name){
     if(!src||IMGVARS[src]) return;
+    name=String(name||'image.png').split(/[\\/]/).pop().replace(/[<>:\"|?*]/g,'_')||'image.png';
+    var original=name,n=2,dot=name.lastIndexOf('.');
+    while(files[name.toLowerCase()])name=(dot>0?original.slice(0,dot):original)+'-'+(n++)+(dot>0?original.slice(dot):'');
+    files[name.toLowerCase()]=true;
     var stem=String(name||'image').replace(/\.[A-Za-z0-9]+$/,'')||'image';
     var v=javaName('img '+stem,used);
     IMGVARS[src]=v;
@@ -106,7 +110,9 @@ function collectImages(used){
 function fontDecl(v,l){
   var style = l.text.bold&&l.text.italic ? 'Font.BOLD | Font.ITALIC'
             : l.text.bold ? 'Font.BOLD' : l.text.italic ? 'Font.ITALIC' : 'Font.PLAIN';
-  return 'Font font'+cap(v)+' = new Font('+jstr(l.text.family)+', '+style+', '+l.text.size+');\n';
+  var size=Math.max(1,l.text.size);
+  return 'Font font'+cap(v)+' = new Font('+jstr(l.text.family)+', '+style+', '+Math.round(size)+')'
+    +(Number.isInteger(size)?'':'.deriveFont('+coord(size)+'f)')+';\n';
 }
 // text as a real Shape, so it can join an Area the same way a path can
 // Shapes are declared either inline (everything inside paintComponent) or split
@@ -257,10 +263,11 @@ function textBlock(l,v){
   out+=g2n()+'.setFont(font'+cap(v)+');\n';
   var lines=String(l.text.s||'').split('\n');
   lines.forEach(function(line,i){
-    var yy=Math.round(l.text.y+i*l.text.size*1.2);
+    var yy=coord(l.text.y+i*l.text.size*1.2);
     if(l.render==='fill'||l.render==='both'){
       out+=paintStmt(l);
-      out+=g2n()+'.drawString('+jstr(line)+', '+coord(l.text.x)+', '+yy+');\n';
+      var xx=coord(l.text.x), fractional=xx.indexOf('.')>=0||yy.indexOf('.')>=0;
+      out+=g2n()+'.drawString('+jstr(line)+', '+xx+(fractional?'f':'')+', '+yy+(fractional?'f':'')+');\n';
     }
     if(l.render==='draw'||l.render==='both'){
       out+='Shape outline'+cap(v)+(i?String(i+1):'')+' = font'+cap(v)
@@ -287,8 +294,10 @@ function buildOnceOn(){
 
 // Produces three streams. In "build once" mode the shapes become fields built a
 // single time; otherwise everything lands in the paint stream exactly as before.
+var SOURCE_MAP=[];
 function genParts(split){
   var used={}, F='', B='', P='', first=true;
+  SOURCE_MAP=[];
   var SC=clipScopes(), clipStack=[];   // saved-clip names, innermost last
   var frc=split?'FRC':g2n()+'.getFontRenderContext()';
   var imgs=collectImages(used);
@@ -298,12 +307,12 @@ function genParts(split){
   if(imgs.length){
     if(split){
       imgs.forEach(function(im){ F+='private BufferedImage '+im.v+';\n'; });
-      B+='// keep these files beside the class\n';
+      B+='// files are relative to the Java process working directory\n';
       B+='try {\n';
       imgs.forEach(function(im){ B+='    '+im.v+' = ImageIO.read(new File('+jstr(im.name)+'));\n'; });
       B+='} catch (IOException ex) {\n    ex.printStackTrace();\n}\n';
     } else {
-      P+='// images: keep these files beside the class\n';
+      P+='// images: files are relative to the Java process working directory\n';
       imgs.forEach(function(im){ P+='BufferedImage '+im.v+' = null;\n'; });
       P+='try {\n';
       imgs.forEach(function(im){ P+='    '+im.v+' = ImageIO.read(new File('+jstr(im.name)+'));\n'; });
@@ -321,6 +330,8 @@ function genParts(split){
   }
 
   groups().forEach(function(grp){
+    var start={fields:F.length,build:B.length,paint:P.length};
+    try{
     var base=grp[0];
     var drawable=grp.filter(drawableIn);
     if(!drawable.length) return;
@@ -370,8 +381,16 @@ function genParts(split){
       if(l.kind==='text') P+=textBlock(l,v);
       else if(l.kind==='image'){
         var gi=norm(l.g);
-        P+=g2n()+'.drawImage('+IMGVARS[l.img.src]+', '+coord(gi.x)+', '+coord(gi.y)+', '
-          +coord(gi.w)+', '+coord(gi.h)+', null);\n';
+        if([gi.x,gi.y,gi.w,gi.h].every(Number.isInteger)){
+          P+=g2n()+'.drawImage('+IMGVARS[l.img.src]+', '+coord(gi.x)+', '+coord(gi.y)+', '
+            +coord(gi.w)+', '+coord(gi.h)+', null);\n';
+        } else {
+          var iv=IMGVARS[l.img.src];
+          P+='if ('+iv+' != null) {\n'
+            +'    AffineTransform imageTx'+cap(v)+' = AffineTransform.getTranslateInstance('+coord(gi.x)+', '+coord(gi.y)+');\n'
+            +'    imageTx'+cap(v)+'.scale('+coord(gi.w)+' / (double) '+iv+'.getWidth(), '+coord(gi.h)+' / (double) '+iv+'.getHeight());\n'
+            +'    '+g2n()+'.drawImage('+iv+', imageTx'+cap(v)+', null);\n}\n';
+        }
       } else {
         if(l.render==='fill'||l.render==='both'){ P+=paintStmt(l); P+=g2n()+'.fill('+v+');\n'; }
         if(l.render==='draw'||l.render==='both'){
@@ -417,6 +436,10 @@ function genParts(split){
     }
     P+=tfClose(base,av);
     P+=alphaClose(base,av);
+    } finally {
+      SOURCE_MAP.push({layers:grp.map(function(l){ return S.layers.indexOf(l); }),
+        fields:F.slice(start.fields),build:B.slice(start.build),paint:P.slice(start.paint)});
+    }
   });
 
   if(clipStack.length) P+='\n';
@@ -542,7 +565,12 @@ return {
   classNameOf:classNameOf,
   outputText:outputText,
   generate:generate,
-  fullClass:fullClass
+  fullClass:fullClass,
+  parts:function(){ return genParts(buildOnceOn()); },
+  sourceMap:function(){ return SOURCE_MAP; },
+  assets:function(){ return collectImages({}); },
+  imports:classImports,
+  background:bgSetup
 };
 };
 

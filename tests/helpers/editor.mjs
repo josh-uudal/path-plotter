@@ -3,7 +3,7 @@ import { createContext, runInContext } from 'node:vm';
 
 export function createEditor(project = {}, options = {}) {
   const context = createContext({ window: {} });
-  for (const file of ['core/state', 'core/geometry', 'core/scene', 'core/history', 'codegen/java2d', 'ui/code-output']) {
+  for (const file of ['core/state', 'core/geometry', 'core/scene', 'core/history', 'core/path-editing', 'core/edit-actions', 'canvas/snapping', 'project/validation', 'project/session-store', 'codegen/java2d', 'ui/code-output']) {
     const source = readFileSync(new URL(`../../assets/js/${file}.js`, import.meta.url), 'utf8');
     runInContext(source, context, { filename: file + '.js' });
   }
