@@ -3,7 +3,7 @@ import { createContext, runInContext } from 'node:vm';
 
 export function createEditor(project = {}, options = {}) {
   const context = createContext({ window: {} });
-  for (const file of ['core/state', 'core/geometry', 'core/scene', 'core/history', 'core/path-editing', 'core/edit-actions', 'canvas/snapping', 'project/validation', 'project/session-store', 'codegen/java2d', 'ui/code-output']) {
+  for (const file of ['core/state', 'core/selection', 'core/geometry', 'core/scene', 'core/history', 'core/path-editing', 'core/edit-actions', 'canvas/snapping', 'project/validation', 'project/session-store', 'codegen/java2d', 'ui/code-output']) {
     const source = readFileSync(new URL(`../../assets/js/${file}.js`, import.meta.url), 'utf8');
     runInContext(source, context, { filename: file + '.js' });
   }
@@ -12,6 +12,8 @@ export function createEditor(project = {}, options = {}) {
   const state = model.state;
   Object.assign(state, structuredClone(project));
   state.layers = (project.layers || []).map(layer => model.normalize(structuredClone(layer)));
+  state.active = project.active ?? (state.layers.length ? 0 : -1);
+  state.selLayers = project.selLayers ?? (state.active >= 0 ? [state.active] : []);
   const geometry = api.createGeometry({
     state,
     textMetrics() { throw new Error('This test needs real browser font metrics'); }

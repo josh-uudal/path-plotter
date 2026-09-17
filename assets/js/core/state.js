@@ -5,9 +5,9 @@ root.createModel = function(PALETTE){
 var S={
   W:600,H:450,grid:25,snap:true,objectSnap:true,showGrid:true,labels:true,aa:true,
   gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines',solidView:false,
-  tool:'line', out:'frag',
+  tool:'select', out:'frag',
   view:{z:1,x:0,y:0},
-  layers:[],active:0,selLayers:[0],
+  layers:[],active:-1,selLayers:[],
   sel:null,drag:null,hover:null,nextIsMove:false,
   panDrag:null,imgDrag:null,newDrag:null,moveDrag:null,rotDrag:null,marquee:null,
   scaleDrag:null,scaleMode:'geom',scaleEach:false,scaleLock:true,
@@ -21,6 +21,18 @@ var S={
 var GID=0;
 
 function L(){ return S.layers[S.active]; }
+
+// Read current names, including renames/imports, instead of counting layers.
+function nextName(kind){
+  var max=0, prefix=kind.toLowerCase()+' ';
+  S.layers.forEach(function(l){
+    var name=String(l.name).trim().toLowerCase();
+    if(name.indexOf(prefix)!==0) return;
+    var suffix=name.slice(prefix.length);
+    if(/^\d+$/.test(suffix)) max=Math.max(max,Number(suffix));
+  });
+  return kind+' '+(max+1);
+}
 
 function defaults(name,kind){
   var c=PALETTE[S.layers.length%PALETTE.length];
@@ -77,6 +89,7 @@ function nextGroupId(){ return 'g'+(++GID); }
 return {
   state:S,
   L:L,
+  nextName:nextName,
   defaults:defaults,
   polygonal:polygonal,
   normalize:normalize,

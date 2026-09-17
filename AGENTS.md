@@ -18,6 +18,7 @@ maintaining a second copy. The user's current instructions take precedence.
 ## Where code belongs
 
 - `assets/js/core/state.js`: initial state, shape defaults/normalization, group ids.
+- `assets/js/core/selection.js`: empty selection, group expansion, selection toggles.
 - `assets/js/core/geometry.js`: geometry shared by rendering and Java generation.
 - `assets/js/core/scene.js`: paint ordering, boolean runs, and clip ownership.
 - `assets/js/core/history.js`: snapshot history, with UI updates passed as callbacks.
@@ -29,6 +30,7 @@ maintaining a second copy. The user's current instructions take precedence.
   helpers, and output-option callbacks. Do not read the DOM in this module.
 - `assets/js/ui/code-output.js`: escaping, highlighting, and source-to-shape mapping.
 - `assets/js/ui/workspace.js`: workspace controls, focus, and edit-session wiring.
+- `assets/js/ui/tooltips.js`: hover, focus, and touch help for live descriptions.
 - `assets/js/main.js`: canvas rendering, interaction, panels, persistence, rulers,
   set operation lab, and boot. See `docs/architecture.md` before extracting more.
 - `assets/css/`: base, layout, and editor rules, in that cascade order.
@@ -54,8 +56,13 @@ introduce eval-based module loading. Preserve existing behavior during extractio
 - One state object `S` owns the drawing. `S.layers[0]` paints first, at the back.
   The Shapes panel renders in reverse: top row is the front. Use each row's
   `data-idx`, never its DOM position, as the model index.
-- Selection currently always contains at least one active layer. Preserve this
-  invariant until an explicitly scoped selection change addresses all callers.
+- Empty documents and empty selections are valid. No selection means `active:-1`,
+  `selLayers:[]`, and `sel:null`. Guard active-layer reads; keep the inspector
+  inactive until a shape is selected. Save/import/history must preserve emptiness.
+- Generate default names with `nextName(kind)` so renames and imports cannot
+  collide with the next numbered shape. Changing path tools continues the current
+  drawing; explicit Finish/New path controls its lifetime. Anchor hits precede
+  adding points; closing a path does not add a duplicate endpoint.
 - Record `push()` before a drawing mutation. Main supplies a full serializable
   project snapshot, so undo of an import also restores settings and image assets.
 - Pen points may have `smooth`, `outX`, and `outY` metadata. Move, scale, flip,

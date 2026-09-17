@@ -9,9 +9,9 @@ without a build step. Factories keep internal variables private.
 
 Loading order is explicit in index.html:
 
-1. State, geometry, scene, and history factories.
+1. State, selection, geometry, scene, and history factories.
 2. Java generator and code-output formatting.
-3. Path editing, edit actions, drawing snapping, project validation/storage, and workspace UI.
+3. Path editing, edit actions, drawing snapping, project validation/storage, tooltips, and workspace UI.
 4. Main editor initialization.
 
 The state factory owns shape normalization and the group-id counter. Geometry
@@ -50,6 +50,16 @@ initialization, or an all-purpose global service object.
 Model ordering is back-to-front; the shape list displays front-to-back. Boolean
 runs get their appearance from the first model layer. Clip ownership comes from
 the shared scene helper. The canvas and Java generator must agree on these rules.
+
+Documents may contain zero layers, and selection may be empty even when shapes
+exist. The selection factory represents this as `active: -1` and `selLayers: []`.
+The property inspector is inactive until a shape is selected. History and project
+recovery preserve this state. Default numbered names scan current layer names,
+including renamed and imported shapes.
+
+Path-tool changes preserve an ongoing path. Handle hits are checked before point
+creation; the current run's starting anchor closes it without another endpoint.
+Finish exits drawing, Continue resumes the selected path, and Escape deselects.
 
 The current `sync()` refreshes most UI and schedules a local save. Live drags often
 use smaller update sequences for immediate feedback. History must be recorded

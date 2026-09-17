@@ -21,7 +21,7 @@ function restore(str){
   // a row that is no longer a base is inert, so index carry-over is enough
   S.layers.forEach(function(l,i){ if(folds[i]!==undefined) l.collapsed=folds[i]; });
   S.active=Math.min(st.active,st.layers.length-1);
-  S.selLayers=st.sel||[S.active];
+  S.selLayers=st.sel||(S.active>=0?[S.active]:[]);
   S.W=st.W; S.H=st.H; S.sel=st.point||null;
   S.measures=st.measures||[];
   S.measSel=Math.min(st.measSel===undefined?-1:st.measSel,S.measures.length-1);

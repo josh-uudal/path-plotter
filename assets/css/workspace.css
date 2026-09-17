@@ -11,17 +11,34 @@ header .readout{display:none}
 #rail .tool svg{width:18px;height:18px}
 .tool-caption{font:9px "IBM Plex Sans",sans-serif;line-height:12px}
 #rail .sep{margin:3px 0}
-#canvasBar,#pathBar{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--edge);min-height:39px;flex-shrink:0}
+#canvasBar{display:flex;align-items:center;gap:8px;padding:4px 10px;background:var(--panel);border-bottom:1px solid var(--edge);min-height:37px;flex-shrink:0;overflow-x:auto;scrollbar-width:thin}
+#canvasBar>*{flex-shrink:0}
 #canvasBar .spacer{flex:1}
-#selectionInfo{font-size:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:40%}
+#selectionInfo{font-size:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#selectionSummary{display:flex;flex-direction:column;gap:3px;padding:9px 12px;border-bottom:1px solid var(--edge)}
+#selectionSummary #pathState{font-size:11px;color:var(--ink-soft)}
+#pathState:empty{display:none}
+#nothingSelected,.empty-shapes{font-size:12px;line-height:1.6;padding:8px 12px;color:var(--ink-soft)}
+#props.no-selection :is([data-pane="shape"],[data-pane="transform"],[data-pane="style"]){display:none}
+[hidden]{display:none!important}
 .compactCheck{display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;cursor:pointer}
 .compactCheck input{accent-color:var(--plot)}
-#pathBar{padding-top:5px;padding-bottom:5px;gap:6px;min-height:36px}
-#pathBar .note{margin:0 0 0 5px}
+#pathBar{display:flex;align-items:center;gap:5px;padding-right:8px;border-right:1px solid var(--edge)}
 #canvasBar .act,#pathBar .act{font:12px "IBM Plex Sans",sans-serif;padding:4px 9px}
-#statusbar{opacity:1;white-space:normal;align-items:flex-start;max-width:min(640px,calc(100% - 20px));font-size:12px;padding:6px 9px}
+#statusbar{opacity:1;white-space:normal;align-items:center;max-width:min(640px,calc(100% - 20px));font-size:12px;padding:4px 9px;pointer-events:auto}
 #statusbar .stag{padding-top:1px}
 #hint{min-width:0}
+.tooltip-source{display:none!important}
+.section-label{display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600}
+.help-tip{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:20px;height:20px;padding:0;margin:0 0 0 6px;border:1px solid #83978a;border-radius:50%;background:transparent;color:#334e40;font:600 12px "IBM Plex Sans",sans-serif;cursor:help;vertical-align:middle;letter-spacing:0;text-transform:none}
+.help-tip:hover,.help-tip:focus-visible{background:#dce8df;border-color:#334e40}
+.description-tooltip{position:fixed;z-index:200;max-width:min(340px,calc(100vw - 16px));max-height:calc(100dvh - 24px);overflow:auto;background:#213b45;color:#fff;border:1px solid #526e76;border-radius:6px;padding:10px 12px;box-shadow:0 6px 22px #17242b33;font:12px/1.65 "IBM Plex Sans",sans-serif;white-space:normal}
+.layer.sel,.layer.sel.clipowner{background:#365c68;border-color:#244652}
+.layer.sel .lname{color:#fff}
+.layer.sel .lmeta,.layer.sel .eye,.layer.sel .twisty{color:#d6e7ed}
+.layer.sel .twisty,.layer.sel .nestmark>i{background:#365c68}
+.layer.sel .lname:focus{color:var(--ink);background:white}
+.layer.on{box-shadow:inset 3px 0 var(--plot)}
 #side{width:330px;max-width:48vw}
 #tabs{flex-wrap:wrap}
 #tabs button{font-family:"IBM Plex Sans",sans-serif;letter-spacing:0;text-transform:none;font-size:12px;padding:10px 4px}
@@ -79,9 +96,9 @@ body.loading-project #shell{pointer-events:none;opacity:.6}
   header{min-height:92px}header .spacer{display:none}header h1{margin-right:auto}
   header #menubar{order:5}header .zoomctl{order:6;margin-left:auto}
   .save-status{flex:1;max-width:140px;font-size:10px}#toggleInspector{font-size:11px}
-  #canvasBar,#pathBar{padding-left:7px;padding-right:7px;gap:6px}
-  #selectionInfo{display:none}#canvasBar .spacer{display:none}#viewMode{margin-left:auto;font-size:11px!important}
-  #pathBar .note{display:none}#pathBar .act{padding:4px 8px}
+  #canvasBar{padding-left:7px;padding-right:7px;gap:6px}
+  #canvasBar .spacer{display:none}#viewMode{margin-left:auto;font-size:11px!important}
+  #pathBar .act{padding:4px 8px}
   #codeSelection{display:none}#drawer{height:245px}
   #drawer .bar #outMode{width:156px!important}#drawer .bar .act{font-size:11px}
   #statusbar{left:5px;bottom:5px;max-width:calc(100% - 10px);font-size:11px}#statusbar .stag{display:none}

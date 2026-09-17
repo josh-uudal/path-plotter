@@ -157,22 +157,20 @@
 
   <div id="centre">
     <div id="canvasBar" aria-label="Drawing controls">
-      <span id="selectionInfo">Empty path</span>
+      <button class="act" id="newPath">New path</button>
+      <div id="pathBar" role="group" aria-label="Path actions">
+        <button class="act" id="finishPath" title="Finish drawing (Enter)">Finish</button>
+        <button class="act" id="closePath" title="Join the last point to the starting anchor">Close path</button>
+        <button class="act" id="continuePath">Continue</button>
+      </div>
       <span class="spacer"></span>
       <label class="compactCheck"><input type="checkbox" id="quickSnap" checked> Snap</label>
       <label class="compactCheck"><input type="checkbox" id="objectSnap" checked> Objects</label>
       <button class="act" id="viewMode" aria-pressed="false" title="Toggle selection dimming (D)">Edit view</button>
     </div>
-    <div id="pathBar" aria-label="Path actions">
-      <button class="act" id="newPath">New path</button>
-      <button class="act" id="finishPath" title="Finish drawing (Enter)">Finish</button>
-      <button class="act" id="closePath">Close path</button>
-      <button class="act" id="continuePath">Continue</button>
-      <span id="pathState" class="note"></span>
-    </div>
     <div id="stage">
       <canvas id="board" tabindex="0" aria-label="Drawing canvas. Choose a tool to draw. Arrow keys move the selection."></canvas>
-      <div id="statusbar"><span class="stag" id="hintTag">tool</span><span id="hint"></span></div>
+      <div id="statusbar"><span class="stag" id="hintTag">tool</span><span id="shortHint"></span><span id="hint" class="note" data-help-label="Current tool"></span></div>
       <div id="dropzone">Drop the photo to trace it</div>
     </div>
     <div id="drawer">
@@ -237,6 +235,8 @@
     </div>
 
     <div id="props">
+      <div id="selectionSummary"><span id="selectionInfo">Nothing selected</span><span id="pathState"></span></div>
+      <p id="nothingSelected">Nothing selected. Click a shape to edit it, or choose a drawing tool to begin.</p>
 
       <!-- ============ SHAPE ============ -->
       <div class="pane on" data-pane="shape">
@@ -244,13 +244,14 @@
           <h2>Geometry <span class="kindtag" id="kindTag">GeneralPath</span></h2>
 
           <div id="geoPath">
-            <p class="note">Use the Pen to click corners or drag smooth curves. Select an anchor to edit its handles.</p>
+            <p class="note" data-help-for="pathBar" data-help-label="Drawing paths">Use the Pen to click corners or drag smooth curves. Click the starting anchor to close the path. Clicking another anchor selects it without adding a point. Enter finishes; Continue resumes the selected path.</p>
+            <div class="section-label" id="nodeHelpLabel">Anchor editing</div>
             <div id="nodeActions" class="btns">
               <button class="act" id="smoothNode">Smooth node</button><button class="act" id="cornerNode">Corner node</button>
               <button class="act" id="curveSegment">Curve segment</button><button class="act" id="lineSegment">Straight segment</button>
             </div>
             <div id="pointActions" class="btns"></div>
-            <p class="note" id="nodeNote">Select a point on the canvas.</p>
+            <p class="note" id="nodeNote" data-help-for="nodeHelpLabel" data-help-label="Anchor editing">Select a point on the canvas.</p>
             <details class="advanced"><summary>Java path settings</summary>
             <div class="row">
               <div class="field"><label for="shapeClass">Java shape class</label>
@@ -663,7 +664,7 @@
     <div class="pvRow"><span>Window <code>JFrame</code></span><b id="pvFrame">616 &times; 489</b></div>
     <div class="pvRow"><span>Shown at</span><b id="pvZoom">100%</b></div>
     <p class="note" id="pvWarn"></p>
-    <p class="note" id="pvNote"></p>
+    <p class="note" id="pvNote" data-help-label="Preview dimensions"></p>
   </div>
   </div>
 </div>
@@ -707,7 +708,7 @@
 
     <!-- the algebra, and what Java it turns into -->
     <div id="slRight">
-      <h3>Expression</h3>
+      <h3 id="slExpressionHeading">Expression</h3>
       <textarea id="slExpr" spellcheck="false" rows="2">A &minus; B</textarea>
       <div id="slOps">
         <button class="act" data-ins="&cup;" title="union — add">&cup;</button>
@@ -718,9 +719,9 @@
         <button class="act" data-ins=")" title="close a group">)</button>
       </div>
       <p class="note" id="slErr"></p>
-      <p class="note">&cap; binds tightest, then &minus;, then &cup; and &oplus;. Brackets beat all of them. <code>+ - &amp; ^</code> work as plain-keyboard stand-ins.</p>
+      <p class="note" data-help-for="slExpressionHeading" data-help-label="Expression operators">&cap; binds tightest, then &minus;, then &cup; and &oplus;. Brackets beat all of them. <code>+ - &amp; ^</code> work as plain-keyboard stand-ins.</p>
 
-      <h3>Java</h3>
+      <h3 id="slJavaHeading">Java</h3>
       <pre id="slCode"></pre>
       <div class="btns">
         <button class="act" id="slCopy">Copy Java</button>
@@ -729,7 +730,7 @@
       <div class="btns" style="grid-template-columns:1fr">
         <button class="act primary" id="slInsert">Insert result outline</button>
       </div>
-      <p class="note" id="slInsNote"></p>
+      <p class="note" id="slInsNote" data-help-for="slJavaHeading" data-help-label="Inserting the result"></p>
     </div>
   </div>
 </div>
@@ -742,6 +743,7 @@
       <tr><td><kbd>V</kbd></td><td>Select: drag points, corners, or a whole shape</td></tr>
       <tr><td><kbd>F</kbd></td><td>Pen: click corners, drag smooth curves</td></tr>
       <tr><td><kbd>Enter</kbd></td><td>Finish the current path; Continue resumes it</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Release the drawing tool and deselect everything</td></tr>
       <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Line, quadratic, cubic path segment</td></tr>
       <tr><td><kbd>R</kbd></td><td>Rectangle; set an arc width for RoundRectangle2D</td></tr>
       <tr><td><kbd>E</kbd></td><td>Ellipse</td></tr>
@@ -793,6 +795,7 @@
 </div>
 
 <script src="assets/js/core/state.js"></script>
+<script src="assets/js/core/selection.js"></script>
 <script src="assets/js/core/geometry.js"></script>
 <script src="assets/js/core/scene.js"></script>
 <script src="assets/js/core/history.js"></script>
@@ -803,6 +806,7 @@
 <script src="assets/js/canvas/snapping.js"></script>
 <script src="assets/js/project/validation.js"></script>
 <script src="assets/js/project/session-store.js"></script>
+<script src="assets/js/ui/tooltips.js"></script>
 <script src="assets/js/ui/workspace.js"></script>
 <script src="assets/js/main.js"></script>
 </body>

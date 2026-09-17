@@ -2,6 +2,7 @@
 "use strict";
 root.createWorkspace=function(deps){
   var S=deps.state, doc=document;
+  root.createTooltips();
   function el(id){ return doc.getElementById(id); }
   function on(id,fn){ el(id).addEventListener('click',fn); }
   function action(fn){ deps.push(); fn(); deps.sync(); }
@@ -97,14 +98,17 @@ root.createWorkspace=function(deps){
       var l=S.layers[S.active],path=l&&l.kind==='path',has=path&&l.pts.length;
       var selected=path&&S.sel&&l.pts[S.sel.i];
       el('selectionInfo').textContent=S.selLayers.length>1?S.selLayers.length+' shapes selected':
-        l?(l.name+(selected?' · point '+(S.sel.i+1):'')):'Choose a tool';
+        l?(l.name+(selected?' · point '+(S.sel.i+1):'')):'Nothing selected';
       el('quickSnap').checked=S.snap; el('objectSnap').checked=S.objectSnap;
-      el('viewMode').textContent=S.solidView?'True opacity':'Edit view · others dimmed';
+      el('viewMode').textContent=S.solidView?'True opacity':'Edit view';
       el('viewMode').setAttribute('aria-pressed',String(S.solidView));
       el('finishPath').disabled=!has||['pen','line','quad','cubic'].indexOf(S.tool)<0;
-      el('closePath').disabled=!has||l.pts.length<3||l.closed;
+      el('closePath').disabled=!has||l.pts.length<2||l.closed;
       el('continuePath').disabled=!has;
       el('pathState').textContent=has?(l.closed?'Closed path':'Open path')+' · '+l.pts.length+' points':'';
+      el('pathBar').hidden=!path;
+      var tabName=(tabs.filter(function(t){return t.getAttribute('aria-selected')==='true';})[0]||{}).dataset;
+      el('nothingSelected').hidden=!!l||!!(tabName&&['image','ruler'].indexOf(tabName.p)>=0);
       ['smoothNode','cornerNode'].forEach(function(id){ el(id).disabled=!selected||S.sel.key!=='a'; });
       ['curveSegment','lineSegment'].forEach(function(id){ el(id).disabled=!selected||selected.cmd==='move'; });
       el('nodeNote').textContent=selected?

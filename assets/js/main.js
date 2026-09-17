@@ -15,6 +15,7 @@ var model=window.PathPlotter.createModel(PALETTE), S=model.state;
 var workspace, bootReady=false, pathEdit=window.PathPlotter.pathEditing;
 var penDrag=null, penFresh=true, snapMark=null;
 var L=model.L,
+    nextName=model.nextName,
     defaults=model.defaults,
     polygonal=model.polygonal,
     normalize=model.normalize,
@@ -52,43 +53,14 @@ var isCircularArc=geometry.isCircularArc,
 
 /* ================= selection & groups ================= */
 
-function normSel(){
-  S.selLayers=(S.selLayers||[]).filter(function(i){ return i>=0&&i<S.layers.length; });
-  if(!S.selLayers.length) S.selLayers=[S.active];
-  if(S.selLayers.indexOf(S.active)<0) S.selLayers=[S.active];
-}
-function groupIdxs(gid){
-  var a=[];
-  if(!gid) return a;
-  S.layers.forEach(function(l,i){ if(l.group===gid) a.push(i); });
-  return a;
-}
-function expandSel(idxs){
-  var out=[];
-  idxs.forEach(function(i){
-    var l=S.layers[i]; if(!l) return;
-    if(l.group) groupIdxs(l.group).forEach(function(j){ if(out.indexOf(j)<0) out.push(j); });
-    else if(out.indexOf(i)<0) out.push(i);
-  });
-  return out.sort(function(a,b){ return a-b; });
-}
+var selection=window.PathPlotter.createSelection(S), normSel=selection.normalize,
+    groupIdxs=selection.group, expandSel=selection.expand;
 function setSel(idxs,active){
-  S.selLayers=expandSel(idxs);
-  if(!S.selLayers.length) S.selLayers=[0];
-  var a=(active===undefined)?idxs[idxs.length-1]:active;
-  S.active=(S.selLayers.indexOf(a)>=0)?a:S.selLayers[0];
+  selection.set(idxs,active); penFresh=true;
 }
-function toggleSel(i){
-  var grp=expandSel([i]);
-  if(S.selLayers.indexOf(i)>=0){
-    S.selLayers=S.selLayers.filter(function(j){ return grp.indexOf(j)<0; });
-    if(!S.selLayers.length) S.selLayers=[i];
-    if(S.selLayers.indexOf(S.active)<0) S.active=S.selLayers[0];
-  } else {
-    grp.forEach(function(j){ if(S.selLayers.indexOf(j)<0) S.selLayers.push(j); });
-    S.selLayers.sort(function(a,b){ return a-b; });
-    S.active=i;
-  }
+function toggleSel(i){ selection.toggle(i); penFresh=true; }
+function deselect(){
+  clearDrags(); S.nextIsMove=false; setSel([]); setTool('select'); sync();
 }
 function selObjs(){
   var a=[];
@@ -961,17 +933,17 @@ function dropTfScale(){
 
 // handles live where the transform puts them, not where the raw numbers are
 function hitHandle(x,y){
-  var l=L(); if(!l) return null;
+  var l=L(); if(!l||!l.visible) return null;
   var T=tfMapper(l), hs=handles(l), best=null, bd=11/S.view.z;
   for(var k=hs.length-1;k>=0;k--){
     var q=T(hs[k].x,hs[k].y);
     var d=Math.hypot(q.x-x,q.y-y);
-    if(d<bd){ bd=d; best=hs[k]; }
+    if(d<bd||(best&&Math.abs(d-bd)<.01&&hs[k].key==='a')){ bd=d; best=hs[k]; }
   }
   return best;
 }
 function insertAt(sx,sy){
-  var l=L(); if(l.kind!=='path') return false;
+  var l=L(); if(!l||l.kind!=='path'||hitHandle(sx,sy)) return false;
   var q=unTf(l,sx,sy);
   var best=null;
   for(var i=1;i<l.pts.length;i++){
@@ -1216,7 +1188,7 @@ function draw(){
 
   // solidView paints every shape at its real alpha, the way the panel will look;
   // otherwise anything outside the selection drops to 45% so the selection reads
-  paintAll(ctx,z,selObjs(),S.solidView);
+  paintAll(ctx,z,selObjs(),S.solidView||!S.selLayers.length);
   drawSelOutlines();
   if(L()&&L().visible) drawHandles();
   drawRotHandle();
@@ -1312,12 +1284,12 @@ function drawGridMarks(g,N,showMinor,majA,minA,isMaj){
   }
 }
 
-// every other selected shape gets a quiet outline so multi-select is visible
+// Secondary selections stay distinct from the active shape's red handles.
 function drawSelOutlines(){
   if(S.selLayers.length<2) return;
   var z=S.view.z;
   ctx.save();
-  ctx.setLineDash([5/z,4/z]); ctx.lineWidth=1/z; ctx.strokeStyle=rgba('#2f6f8f',.75);
+  ctx.setLineDash([6/z,3/z]);
   S.selLayers.forEach(function(i){
     var l=S.layers[i];
     if(!l||i===S.active||!l.visible) return;
@@ -1327,7 +1299,9 @@ function drawSelOutlines(){
     ctx.beginPath();
     ctx.moveTo(c0.x,c0.y); ctx.lineTo(c1.x,c1.y);
     ctx.lineTo(c2.x,c2.y); ctx.lineTo(c3.x,c3.y);
-    ctx.closePath(); ctx.stroke();
+    ctx.closePath();
+    ctx.lineWidth=4/z; ctx.strokeStyle='#ffffff'; ctx.stroke();
+    ctx.lineWidth=2/z; ctx.strokeStyle='#174b66'; ctx.stroke();
   });
   ctx.setLineDash([]);
   ctx.restore();
@@ -1627,6 +1601,8 @@ var javaIdent=java.javaIdent,
 
 function emitCode(){
   var el=document.getElementById('code'), txt=outputText();
+  document.getElementById('codeSelection').textContent=S.sel?'Highlighted: point '+(S.sel.i+1):
+    S.selLayers.length?'Highlighted: '+S.selLayers.map(function(i){return S.layers[i].name;}).join(', '):'No shape selected';
   var blank=document.getElementById('blank'), empty=!txt.trim();
   // an empty sheet shows the title block instead of a lone comment line
   if(blank){ blank.hidden=!empty; if(empty) fillBlank(); }
@@ -1654,8 +1630,6 @@ function updateExportUI(){
   imgs.forEach(function(im){
     var a=document.createElement('a');a.href=im.src;a.download=im.name;a.textContent='↓ '+im.name;list.appendChild(a);
   });
-  document.getElementById('codeSelection').textContent=S.sel?'Highlighted: point '+(S.sel.i+1):
-    'Highlighted: '+S.selLayers.map(function(i){return S.layers[i].name;}).join(', ');
 }
 
 // keep the title block's fields honest — they mirror live state
@@ -1726,9 +1700,9 @@ var RAIL=[
 ];
 var SHAPE_TOOLS={rect:1,ellipse:1,arc:1};
 var HINTS={
-  select:'Drag handles to reshape. Double-click a segment to insert a point. Ctrl+click to multi-select; hold Ctrl for the scale grips.',
-  pen:'Click for a corner. Drag for a smooth curve. Enter finishes; Close path joins the ends. Hold Alt to bypass snapping.',
-  line:'Click to add a straight segment. Enter finishes the path.',
+  select:'Drag handles to reshape. Double-click a segment to insert a point. Ctrl+click toggles selection; hold Ctrl for scale grips. Click blank space to deselect. Escape releases the tool and selection.',
+  pen:'Click for a corner. Drag for a smooth curve. Click the starting anchor to close; other anchors select without adding a point. Enter finishes. Escape releases the tool and selection. Hold Alt to bypass snapping.',
+  line:'Click to add a straight segment. Click the starting anchor to close the path. Enter finishes; Escape releases the tool and selection.',
   quad:'Click to add a curve, then drag its control square',
   cubic:'Click to add a curve, then drag its two control squares',
   rect:'Drag out a rectangle; give it an arc width for RoundRectangle2D',
@@ -1746,6 +1720,9 @@ var hintEl=document.getElementById('hint'), hintTag=document.getElementById('hin
 function setStatus(tag,text,lit){
   hintTag.textContent=tag;
   hintEl.textContent=text;
+  document.getElementById('shortHint').textContent=lit?text:
+    S.tool==='select'?'Esc to deselect':isPathTool(S.tool)?'Enter to finish · Esc to deselect':
+    S.tool==='measure'&&S.measSel>=0?text:'Esc to release tool';
   statusEl.classList.toggle('lit',!!lit);
 }
 function toolStatus(){ setStatus(S.tool,HINTS[S.tool]||'',false); }
@@ -1792,7 +1769,10 @@ function railAction(item){
 }
 function setTool(t){
   if(t==='image'&&!S.img){ showTab('image'); document.getElementById('trace').click(); return; }
-  if(t!==S.tool){ penFresh=true; penDrag=null; snapMark=null; }
+  if(t!==S.tool){
+    if(!isPathTool(t)||!isPathTool(S.tool)) penFresh=true;
+    penDrag=null; snapMark=null;
+  }
   editActions.endNudge();
   S.tool=t;
   if(t!=='select') S.sel=null;
@@ -1829,6 +1809,7 @@ function showTab(name){
   [].forEach.call(document.querySelectorAll('.pane'),function(p){
     p.classList.toggle('on',p.dataset.pane===name);
   });
+  if(workspace) workspace.update();
 }
 document.getElementById('tabs').addEventListener('click',function(e){
   var b=e.target.closest('button'); if(b) showTab(b.dataset.p);
@@ -2009,7 +1990,12 @@ function renderLayers(){
       box.appendChild(row);
     })(i);
   }
-  document.getElementById('delLayer').disabled=S.selLayers.length>=S.layers.length;
+  if(!S.layers.length){
+    var empty=document.createElement('p'); empty.className='empty-shapes';
+    empty.textContent='No shapes yet. Choose a drawing tool to begin.'; box.appendChild(empty);
+  }
+  document.getElementById('delLayer').disabled=!S.selLayers.length;
+  document.getElementById('dupLayer').disabled=!S.selLayers.length;
   document.getElementById('groupLayer').disabled=S.selLayers.length<2;
   var anyGrouped=S.selLayers.some(function(i){ return S.layers[i]&&S.layers[i].group; });
   document.getElementById('ungroupLayer').disabled=!anyGrouped;
@@ -2063,7 +2049,7 @@ function rowUp(){
   rd.row.classList.remove('dragging');
   if(!rd.moved){
     if(rd.ctrl) toggleSel(rd.idx);
-    else if(rd.shift){
+    else if(rd.shift&&S.active>=0){
       var a=Math.min(S.active,rd.idx), b=Math.max(S.active,rd.idx), r=[];
       for(var i=a;i<=b;i++) r.push(i);
       setSel(r,rd.idx);
@@ -2087,7 +2073,10 @@ function rowUp(){
 function show(id,on){ document.getElementById(id).style.display=on?'':'none'; }
 
 function syncProps(){
-  var l=L(); if(!l) return;
+  var l=L();
+  document.getElementById('props').classList.toggle('no-selection',!l);
+  document.querySelectorAll('[data-pane="shape"],[data-pane="transform"],[data-pane="style"]').forEach(function(p){p.inert=!l;});
+  if(!l) return;
   var boxy=(l.kind==='rect'||l.kind==='ellipse'||l.kind==='arc'||l.kind==='image');
   document.getElementById('kindTag').textContent=kindLabel(l);
   show('geoPath',l.kind==='path');
@@ -2264,9 +2253,10 @@ function shiftSelection(dx,dy){
   S.selLayers.forEach(function(i){ if(S.layers[i]) shiftLayer(S.layers[i],dx,dy); });
 }
 
+function isPathTool(t){ return ['pen','line','quad','cubic'].indexOf(t)>=0; }
 function newPath(){
   push();
-  var l=normalize(defaults('path '+(S.layers.length+1),'path')); l.closed=false;
+  var l=normalize(defaults(nextName('path'),'path')); l.closed=false;
   S.layers.push(l); S.active=S.layers.length-1; S.selLayers=[S.active]; S.sel=null;
   setTool('pen'); penFresh=false; showTab('shape'); sync();
 }
@@ -2283,8 +2273,8 @@ function continuePath(){
 }
 function ensurePath(){
   var l=L();
-  if(l.kind!=='path'||(penFresh&&l.pts.length)){
-    l=normalize(defaults('path '+(S.layers.length+1),'path')); l.closed=false;
+  if(!l||l.kind!=='path'||(penFresh&&l.pts.length)){
+    l=normalize(defaults(nextName('path'),'path')); l.closed=false;
     S.layers.push(l); S.active=S.layers.length-1; S.selLayers=[S.active]; S.sel=null;
   }
   penFresh=false; return l;
@@ -2292,6 +2282,7 @@ function ensurePath(){
 function addPoint(x,y){
   push();
   var l=ensurePath();
+  l.closed=false;
   if(!l.pts.length||S.nextIsMove){
     l.pts.push({cmd:'move',x:x,y:y}); S.nextIsMove=false;
   } else {
@@ -2308,7 +2299,7 @@ function addPoint(x,y){
 function deleteSelected(){
   if(!S.sel) return;
   var l=L();
-  if(l.kind!=='path'||S.sel.key!=='a'){ toast('Only path points can be deleted'); return; }
+  if(!l||l.kind!=='path'||S.sel.key!=='a'){ toast('Only path points can be deleted'); return; }
   push();
   var i=S.sel.i,was=l.pts[i];
   l.pts.splice(i,1);
@@ -2320,11 +2311,12 @@ function deleteSelected(){
 }
 function deleteLayers(){
   var idxs=S.selLayers.slice().sort(function(a,b){ return b-a; });
-  if(idxs.length>=S.layers.length){ toast('Keep at least one shape'); return; }
+  if(!idxs.length) return;
   push();
   idxs.forEach(function(i){ S.layers.splice(i,1); });
-  S.active=Math.max(0,Math.min(S.active,S.layers.length-1));
-  S.selLayers=[S.active]; S.sel=null; sync();
+  clearDrags();
+  var active=Math.min(S.active,S.layers.length-1);
+  setSel(active>=0?[active]:[],active); setTool('select'); sync();
 }
 /* ---- clipboard ---- */
 
@@ -2498,6 +2490,7 @@ board.addEventListener('pointermove',function(e){
     var snapped=drawingSnap.move(tx,ty,md.sources,S.selLayers,axis);
     tx=snapped.dx; ty=snapped.dy; snapMark=snapped.target?snapped:null;
     if(tx!==md.dx||ty!==md.dy){
+      if(md.historyPending){push();md.historyPending=false;}
       shiftSelection(tx-md.dx,ty-md.dy);
       md.dx=tx; md.dy=ty;
       document.getElementById('coords').textContent=
@@ -2507,6 +2500,10 @@ board.addEventListener('pointermove',function(e){
     return;
   }
   if(S.drag){
+    if(S.drag.historyPending){
+      if(Math.hypot(s.x-S.drag.downX,s.y-S.drag.downY)*S.view.z<3) return;
+      push(); S.drag.historyPending=false;
+    }
     // the pointer is in sheet space; the handle lives in the layer's own space
     var cur=L(),sn=placement(s.x,s.y,S.selLayers), q=unTf(cur,sn.x,sn.y);
     if(cur.kind==='arc'&&(S.drag.key==='as'||S.drag.key==='ae')){
@@ -2580,7 +2577,7 @@ board.addEventListener('pointerdown',function(e){
   if(SHAPE_TOOLS[S.tool]){
     var sp=placement(s.x,s.y,[]);
     push();
-    var nl=normalize(defaults(S.tool+' '+(S.layers.length+1),S.tool));
+    var nl=normalize(defaults(nextName(S.tool),S.tool));
     nl.render='fill';
     nl.g.x=sp.x; nl.g.y=sp.y; nl.g.w=0; nl.g.h=0;
     if(S.tool==='arc'){ nl.g.start=0; nl.g.extent=270; nl.g.arcType='PIE'; }
@@ -2590,7 +2587,7 @@ board.addEventListener('pointerdown',function(e){
   }
   if(S.tool==='text'){
     push();
-    var tl=normalize(defaults('text '+(S.layers.length+1),'text'));
+    var tl=normalize(defaults(nextName('text'),'text'));
     tl.render='fill';
     tl.text.x=snapV(s.x); tl.text.y=snapV(s.y);
     S.layers.push(tl); S.active=S.layers.length-1; S.selLayers=[S.active];
@@ -2599,6 +2596,20 @@ board.addEventListener('pointerdown',function(e){
     return;
   }
 
+  // Handle hits take priority over creating a segment, in every path tool.
+  // The last subpath's move anchor closes the run without duplicating it.
+  var anchorSnap=isPathTool(S.tool)?placement(s.x,s.y,[]):null;
+  var pathHandle=anchorSnap?(hitHandle(s.x,s.y)||hitHandle(anchorSnap.x,anchorSnap.y)):null;
+  if(pathHandle){
+    var current=L(), start=current.kind==='path'?current.pts.length-1:-1;
+    while(start>0&&current.pts[start].cmd!=='move') start--;
+    if(pathHandle.key==='a'&&!S.nextIsMove&&!current.closed&&pathHandle.i===start&&current.pts.length-start>=2){
+      finishPath(true); return;
+    }
+    S.drag=Object.assign({},pathHandle,{historyPending:true,downX:s.x,downY:s.y});
+    S.sel={i:pathHandle.i,key:pathHandle.key};
+    board.style.cursor='grabbing'; sync(); return;
+  }
   if(S.tool==='pen'){
     if(s.x<0||s.y<0||s.x>S.W||s.y>S.H) return;
     var pp=placement(s.x,s.y,[]); push();
@@ -2632,7 +2643,10 @@ board.addEventListener('pointerdown',function(e){
   }
 
   var h=hitHandle(s.x,s.y);
-  if(h){ push(); S.drag=h; S.sel={i:h.i,key:h.key}; board.style.cursor='grabbing'; sync(); return; }
+  if(h){
+    S.drag=Object.assign({},h,{historyPending:true,downX:s.x,downY:s.y});
+    S.sel={i:h.i,key:h.key}; board.style.cursor='grabbing'; sync(); return;
+  }
 
   if(S.tool==='select'){
     var add=e.ctrlKey||e.metaKey;
@@ -2644,10 +2658,9 @@ board.addEventListener('pointerdown',function(e){
       if(add){ toggleSel(hitIdx); S.sel=null; sync(); return; }
       if(S.selLayers.indexOf(hitIdx)<0){ setSel([hitIdx],hitIdx); S.sel=null; sync(); }
       else if(hitIdx!==S.active){ S.active=hitIdx; sync(); }
-      push();
       var sourcePoints=[];
       selObjs().forEach(function(l){sourcePoints=sourcePoints.concat(snapPointsFor(l));});
-      S.moveDrag={ox:snapV(s.x),oy:snapV(s.y),dx:0,dy:0,sources:sourcePoints};
+      S.moveDrag={ox:snapV(s.x),oy:snapV(s.y),dx:0,dy:0,sources:sourcePoints,historyPending:true};
       board.style.cursor='grabbing';
       return;
     }
@@ -2670,7 +2683,7 @@ board.addEventListener('pointerdown',function(e){
       ny=Math.round(pv.y+Math.sin(ang)*len);
     }
   }
-  var local=L().kind==='path'&&!penFresh?unTf(L(),nx,ny):{x:nx,y:ny};
+  var local=L()&&L().kind==='path'&&!penFresh?unTf(L(),nx,ny):{x:nx,y:ny};
   addPoint(local.x,local.y);
 });
 
@@ -2685,6 +2698,7 @@ board.addEventListener('dblclick',function(e){
   var hit=topHitAt(s.x,s.y);
   if(hit>=0&&S.layers[hit].kind==='text'){ openTextEditor(hit); return; }
   if(S.tool!=='select') return;
+  if(hitHandle(s.x,s.y)) return;
   if(!insertAt(s.x,s.y)) toast('Double-click closer to a path segment');
 });
 
@@ -2799,9 +2813,10 @@ function showCtx(clientX,clientY){
   ctxSep();
   if(l&&l.kind==='text') ctxItem('Edit text on canvas',function(){ openTextEditor(S.active); });
   ctxItem('Remove last point',function(){
-    var p=L(); if(p.kind==='path'&&p.pts.length){ push(); p.pts.pop(); S.sel=null; sync(); }
+    var p=L(); if(p&&p.kind==='path'&&p.pts.length){ push(); p.pts.pop(); S.sel=null; sync(); }
   },{disabled:!(l&&l.kind==='path'&&l.pts.length)});
-  ctxItem('Delete',deleteLayers,{disabled:n>=S.layers.length});
+  ctxItem('Deselect',deselect,{disabled:!n});
+  ctxItem('Delete',deleteLayers,{disabled:!n});
 
   ctxEl.classList.add('on');
   var r=ctxEl.getBoundingClientRect();
@@ -2834,7 +2849,7 @@ board.addEventListener('pointerup',function(e){
         S.selLayers.sort(function(a,b){ return a-b; });
         S.active=hits[hits.length-1];
       } else setSel(hits,hits[hits.length-1]);
-    } else if(!m.add) setSel([S.active],S.active);
+    } else if(!m.add) setSel([]);
     sync();
     try{ board.releasePointerCapture(e.pointerId); }catch(err){}
     return;
@@ -2905,7 +2920,7 @@ board.addEventListener('wheel',function(e){
 function bindNum(id,fn){
   document.getElementById(id).addEventListener('input',function(){
     var v=parseFloat(this.value);
-    if(!isNaN(v)){ fn(v,L()); emitCode(); draw(); renderLayers(); }
+    if(!isNaN(v)&&L()){ fn(v,L()); emitCode(); draw(); renderLayers(); }
   });
 }
 bindNum('gx',function(v,l){ l.g.x=v; });
@@ -3135,10 +3150,7 @@ document.getElementById('centreV').onclick=function(){
   push(); shiftSelection(0,Math.round((S.H-(b.y1-b.y0))/2-b.y0)); sync();
 };
 
-document.getElementById('addLayer').onclick=function(){
-  push(); S.layers.push(normalize(defaults('path '+(S.layers.length+1),'path')));
-  S.active=S.layers.length-1; S.selLayers=[S.active]; S.sel=null; sync();
-};
+document.getElementById('addLayer').onclick=newPath;
 document.getElementById('dupLayer').onclick=function(){
   var idxs=S.selLayers.slice().sort(function(a,b){ return a-b; });
   if(!idxs.length) return;
@@ -3288,7 +3300,7 @@ function addImageLayer(src,name){
   img.onload=function(){
     IMGS[src]={el:img,ok:true};
     push();
-    var l=normalize(defaults('image '+(S.layers.length+1),'image'));
+    var l=normalize(defaults(nextName('image'),'image'));
     l.img={src:src,name:name||'image.png'};
     var sc=Math.min(1,S.W/img.naturalWidth,S.H/img.naturalHeight);
     l.g.w=Math.round(img.naturalWidth*sc); l.g.h=Math.round(img.naturalHeight*sc);
@@ -3308,7 +3320,7 @@ document.getElementById('imgNewFile').addEventListener('change',function(e){
 document.getElementById('traceToLayer').onclick=function(){
   if(!S.img){ toast('Load a trace photo first'); return; }
   push();
-  var l=normalize(defaults('image '+(S.layers.length+1),'image'));
+  var l=normalize(defaults(nextName('image'),'image'));
   l.img={src:S.img.src,name:'trace.png'};
   l.g.x=Math.round(S.img.x); l.g.y=Math.round(S.img.y);
   l.g.w=Math.round(S.img.natW*S.img.scale); l.g.h=Math.round(S.img.natH*S.img.scale);
@@ -3319,37 +3331,40 @@ document.getElementById('traceToLayer').onclick=function(){
 };
 document.getElementById('imgReplace').onclick=function(){ document.getElementById('imgLayerFile').click(); };
 document.getElementById('imgLayerFile').addEventListener('change',function(e){
-  var f=e.target.files[0]; e.target.value='';
+  var f=e.target.files[0], target=L(); e.target.value='';
   readImageFile(f,function(src,name){
-    push(); L().img={src:src,name:name}; sync();
+    if(!target||target.kind!=='image'||S.layers.indexOf(target)<0) return;
+    push(); target.img={src:src,name:name}; sync();
   });
 });
 document.getElementById('imgNatural').onclick=function(){
-  var l=L(); if(l.kind!=='image'||!l.img.src) return;
+  var l=L(); if(!l||l.kind!=='image'||!l.img.src) return;
   var el=getImg(l.img.src); if(!el){ toast('Image still loading'); return; }
   push(); l.g.w=el.naturalWidth; l.g.h=el.naturalHeight; sync();
 };
 document.getElementById('texLoad').onclick=function(){ document.getElementById('texFile').click(); };
 document.getElementById('texFile').addEventListener('change',function(e){
-  var f=e.target.files[0]; e.target.value='';
+  var f=e.target.files[0], target=L(); e.target.value='';
   readImageFile(f,function(src,name){
     var img=new Image();
     img.onload=function(){
+      if(!target||S.layers.indexOf(target)<0) return;
       IMGS[src]={el:img,ok:true};
       push();
-      var l=L();
+      var l=target;
       l.tex={src:src,name:name,x:l.tex.x||0,y:l.tex.y||0,
              w:img.naturalWidth,h:img.naturalHeight};
       l.paint='texture';
       if(l.render==='draw') l.render='fill';
       sync();
     };
-    img.onerror=function(){if(revision===imageLoadRevision){pendingTrace=null;toast('That image could not be decoded');setSaveStatus('error','Image could not load · open backup');}};
+    img.onerror=function(){toast('That texture could not be decoded');};
     img.src=src;
   });
 });
 document.getElementById('texFit').onclick=function(){
-  var l=L(), b=layerBounds(l); if(!b) return;
+  var l=L(); if(!l) return;
+  var b=layerBounds(l); if(!b) return;
   push();
   l.tex.x=Math.round(b.x0); l.tex.y=Math.round(b.y0);
   l.tex.w=Math.max(1,Math.round(b.x1-b.x0)); l.tex.h=Math.max(1,Math.round(b.y1-b.y0));
@@ -3508,7 +3523,7 @@ function projectData(withImages){
     trimmed:!withImages||sessionTrimmed};
 }
 function isBlankSheet(){
-  return S.layers.length===1&&S.layers[0].kind==='path'&&!(S.layers[0].pts||[]).length
+  return (!S.layers.length||(S.layers.length===1&&S.layers[0].kind==='path'&&!(S.layers[0].pts||[]).length))
     &&!S.img&&!LAB.shapes.length&&!S.measures.length;
 }
 function setSaveStatus(state,message){ if(workspace) workspace.saveStatus(state,message); }
@@ -3568,8 +3583,8 @@ function applyProject(d){
   S.gridMajor=gl.major||GRID_DEFAULTS.gridMajor;
   S.gridStyle=gl.style||GRID_DEFAULTS.gridStyle;
   S.layers=d.layers.map(normalize);
-  S.active=Math.min(d.active||0,S.layers.length-1);
-  S.selLayers=[S.active];
+  S.active=d.active;
+  S.selLayers=S.active>=0?[S.active]:[];
   S.layers.forEach(function(l){
     if(l.kind==='image'&&l.img.src) getImg(l.img.src);
     if(l.paint==='texture'&&l.tex.src) getImg(l.tex.src);
@@ -3644,8 +3659,8 @@ document.getElementById('exportPng').onclick=function(){
 };
 document.getElementById('clearAll').onclick=function(){
   push();
-  var clean={version:9,W:S.W,H:S.H,layers:[defaults('path 1','path')],className:document.getElementById('className').value};
-  applyProject(clean);setTool('pen');sync();toast('Cleared. Ctrl+Z brings it back');
+  var clean={version:9,W:S.W,H:S.H,layers:[],active:-1,className:document.getElementById('className').value};
+  applyProject(clean);setTool('select');sync();toast('Cleared. Ctrl+Z brings it back');
 };
 
 /* ================= window preview =================
@@ -3995,9 +4010,13 @@ window.addEventListener('blur',function(){
 
 document.addEventListener('keydown',function(e){
   if(e.key==='Escape'){
-    if(['pen','line','quad','cubic'].indexOf(S.tool)>=0&&document.activeElement===board){finishPath(false);return;}
     if(measCancel()){ e.preventDefault(); return; }
     MENUCLOSE(); hideCtx(); if(pvOn) showPreview(false); if(LAB.on) showSetLab(false);
+    document.getElementById('help').classList.remove('on');
+    if(!/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)&&!document.activeElement.isContentEditable){
+      e.preventDefault(); deselect();
+    }
+    return;
   }
   // A checkbox or a slider has no undo of its own, so the app's has to reach it:
   // ticking "Use as clip region" and pressing Ctrl+Z used to do nothing at all.
@@ -4046,7 +4065,7 @@ document.addEventListener('keydown',function(e){
   else if(k==='p') showPreview();
   else if(k==='b') showSetLab();
   else if(k==='n') document.getElementById('addLayer').click();
-  else if(k==='u'){ var l0=L(); if(l0.kind==='path'&&l0.pts.length){ push(); l0.pts.pop(); S.sel=null; sync(); } }
+  else if(k==='u'){ var l0=L(); if(l0&&l0.kind==='path'&&l0.pts.length){ push(); l0.pts.pop(); S.sel=null; sync(); } }
   else if(k==='delete'||k==='backspace'){
     e.preventDefault();
     if(S.tool==='measure'&&S.measSel>=0) measDelete(S.measSel);
@@ -5510,9 +5529,7 @@ initMenus();
 S.remember=(lsGet(RKEY)!=='0');
 document.getElementById('remember').checked=S.remember;
 
-S.layers.push(normalize(defaults('path 1','path')));
-S.active=0; S.selLayers=[0];
-setTool('pen');
+setTool('select');
 showTab('shape');
 syncSheetUI();
 syncPrecisionUI();

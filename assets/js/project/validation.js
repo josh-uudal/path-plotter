@@ -7,8 +7,8 @@ root.validateProject=function(input){
   function num(v,name,min,max){
     if(typeof v!=='number'||!isFinite(v)||v<min||v>max) fail('Invalid '+name);
   }
-  if(!input||typeof input!=='object'||!Array.isArray(input.layers)||!input.layers.length)
-    fail('No shapes in this project');
+  if(!input||typeof input!=='object'||!Array.isArray(input.layers))
+    fail('Missing shapes list in this project');
   if(input.version!==undefined&&(!Number.isInteger(input.version)||input.version>9||input.version<1))
     fail('Unsupported project version');
   var d=JSON.parse(JSON.stringify(input));
@@ -87,7 +87,7 @@ root.validateProject=function(input){
       walk(m);
     });
   }
-  d.active=Math.max(0,Math.min(Number.isInteger(d.active)?d.active:0,d.layers.length-1));
+  d.active=Math.max(-1,Math.min(Number.isInteger(d.active)?d.active:0,d.layers.length-1));
   return d;
 };
 })(window.PathPlotter = window.PathPlotter || {});
