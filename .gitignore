@@ -1,0 +1,15 @@
+# Local development dependencies and generated output
+node_modules/
+coverage/
+test-results/
+*.class
+*.log
+.DS_Store
+Thumbs.db
+
+# Share Claude's preview configuration, keep personal assistant files local
+.claude/*
+!.claude/launch.json
+.env
+.env.*
+!.env.example

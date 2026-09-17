@@ -1,0 +1,154 @@
+header{display:flex;align-items:center;gap:12px;padding:0 14px;height:46px;
+  border-bottom:1px solid var(--edge);background:var(--panel);flex-shrink:0}
+h1{font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600;letter-spacing:.15em;
+  text-transform:uppercase;margin:0;white-space:nowrap}
+header .spacer{flex:1}
+
+/* top-left menus: hover opens, like a document app */
+#menubar{display:flex;align-items:stretch;height:100%;gap:1px}
+.menu{position:relative;display:flex;align-items:center}
+.menu>button{border:0;background:transparent;cursor:pointer;padding:5px 11px;border-radius:4px;
+  font-family:"IBM Plex Sans",sans-serif;font-size:13.5px;color:var(--ink);line-height:1}
+.menu>button:hover{background:var(--vellum-deep)}
+.menu.open>button{background:var(--ink);color:var(--vellum)}
+.menupanel{position:absolute;top:calc(100% + 5px);left:0;min-width:262px;z-index:60;
+  background:var(--panel);border:1px solid var(--edge);border-radius:6px;
+  box-shadow:0 8px 26px rgba(23,36,43,.18);padding:11px 13px 13px;display:none}
+.menu.open .menupanel{display:block}
+.menupanel h3{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);margin:12px 0 7px}
+.menupanel h3:first-child{margin-top:0}
+.menupanel .row{margin-top:7px}
+.menupanel hr{border:0;border-top:1px solid var(--edge);margin:12px 0 0}
+
+/* right-click menu on the canvas */
+#ctxmenu{position:fixed;z-index:70;min-width:212px;background:var(--panel);
+  border:1px solid var(--edge);border-radius:6px;box-shadow:0 8px 26px rgba(23,36,43,.2);
+  padding:5px;display:none}
+#ctxmenu.on{display:block}
+#ctxmenu button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;
+  cursor:pointer;text-align:left;padding:6px 9px;border-radius:4px;font-size:13px;
+  font-family:"IBM Plex Sans",sans-serif;color:var(--ink)}
+#ctxmenu button:hover{background:var(--vellum-deep)}
+#ctxmenu button:disabled{opacity:.4;cursor:default}
+#ctxmenu button:disabled:hover{background:transparent}
+#ctxmenu .tick{width:13px;flex-shrink:0;color:var(--plot);font-size:12px}
+#ctxmenu .sep{height:1px;background:var(--edge);margin:5px 4px}
+#ctxmenu .head{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-soft);padding:5px 9px 3px}
+.readout{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-soft);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.zoomctl{display:flex;align-items:center;border:1px solid var(--edge);border-radius:4px;background:#fff;overflow:hidden}
+.zoomctl button{border:0;background:transparent;cursor:pointer;padding:5px 9px;
+  font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--ink-soft);line-height:1}
+.zoomctl button:hover{background:var(--vellum-deep)}
+.zoomctl span{font-family:"IBM Plex Mono",monospace;font-size:12px;min-width:50px;text-align:center;
+  color:var(--ink);border-left:1px solid var(--edge);border-right:1px solid var(--edge);padding:5px 0}
+
+#shell{flex:1;display:flex;min-height:0}
+#rail{width:56px;flex-shrink:0;background:var(--rail);display:flex;flex-direction:column;
+  align-items:center;padding:8px 0;gap:2px;overflow-y:auto}
+#rail{scrollbar-width:none}
+#rail::-webkit-scrollbar{width:0;height:0;display:none}
+#rail .tool{width:40px;height:40px;border:0;border-radius:6px;background:transparent;
+  color:var(--rail-soft);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  position:relative;flex-shrink:0;
+  /* fades out slowly when the pointer leaves; the :hover rule snaps it in faster */
+  transition:background .24s ease,color .24s ease}
+#rail .tool svg{width:20px;height:20px}
+#rail .tool:hover{background:#2c414c;color:#e8eef1;transition-duration:.1s}
+#rail .tool[aria-pressed="true"]{background:var(--vellum);color:var(--rail)}
+#rail .tool:disabled{opacity:.28;cursor:default}
+#rail .tool:disabled:hover{background:transparent;color:var(--rail-soft)}
+#rail .tool:focus-visible{outline:2px solid var(--plot);outline-offset:-2px}
+#rail .sep{width:26px;height:1px;background:#38505c;margin:5px 0;flex-shrink:0}
+#rail .grow{flex:1;min-height:6px}
+
+#centre{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+#stage{flex:1;min-height:0;position:relative;overflow:hidden;background:var(--vellum-deep)}
+#board{position:absolute;inset:0;touch-action:none;display:block}
+#dropzone{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+  background:rgba(23,36,43,.55);color:#fff;font-size:16px;pointer-events:none;z-index:5}
+#dropzone.on{display:flex}
+
+/* double-click a text shape to type straight on the sheet */
+#canvasText{position:absolute;z-index:7;margin:0;padding:1px 3px;resize:none;overflow:hidden;
+  border:0;outline:2px solid var(--plot);border-radius:2px;
+  background:rgba(255,255,255,.9);color:var(--ink);white-space:pre;
+  box-shadow:0 2px 12px rgba(23,36,43,.16)}
+
+/* tool description, bottom-left over the sheet */
+#statusbar{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 20px);z-index:6;
+  display:flex;align-items:center;gap:8px;pointer-events:none;
+  background:rgba(247,248,244,.94);border:1px solid var(--edge);border-radius:5px;
+  padding:6px 11px;box-shadow:0 2px 10px rgba(23,36,43,.10);
+  font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  opacity:.55;transition:opacity .14s,border-color .14s}
+#statusbar.lit{opacity:1;border-color:#aab9a9}
+#statusbar .stag{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-soft);flex-shrink:0}
+#statusbar kbd{flex-shrink:0}
+
+#drawer{border-top:1px solid var(--edge);background:var(--panel);display:flex;flex-direction:column;
+  height:200px;flex-shrink:0}
+#drawer.shut{height:36px}
+#drawer .bar{height:36px;flex-shrink:0;display:flex;align-items:center;gap:9px;padding:0 12px;
+  cursor:pointer;user-select:none}
+#drawer .bar h2{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);margin:0}
+#drawer .bar .spacer{flex:1}
+#drawer .chev{transition:transform .15s;color:var(--ink-soft);display:flex}
+#drawer.shut .chev{transform:rotate(-90deg)}
+#drawer.shut pre{display:none}
+pre#code{margin:0;flex:1;overflow:auto;padding:0 14px 12px;font-family:"IBM Plex Mono",monospace;
+  font-size:12.5px;line-height:1.62;white-space:pre;color:var(--ink)}
+#code .kw{color:#2f6f8f} #code .num{color:var(--plot)} #code .cm{color:var(--ink-soft);font-style:italic}
+#code .str{color:#4f7a3a}
+
+/* empty-sheet placeholder: a drawing title block, the ruled corner panel that
+   real technical drawings carry. Values below are live, not decoration. */
+#blank{flex:1;overflow:auto;padding:2px 14px 8px;min-height:0}
+#drawer.shut #blank{display:none}
+#blank[hidden]{display:none}
+.tb{border:1px solid var(--edge);border-radius:4px;background:#fff;overflow:hidden;
+  max-width:560px;position:relative}
+/* registration tick in the corner, as on a plotted sheet */
+.tb::after{content:"";position:absolute;right:7px;top:7px;width:7px;height:7px;
+  border-top:1px solid var(--plot);border-right:1px solid var(--plot);opacity:.55}
+.tbrow{display:flex}
+.tbrow+.tbrow{border-top:1px solid var(--edge)}
+.tbcell{padding:5px 10px;min-width:0;flex:0 0 auto}
+.tbcell+.tbcell{border-left:1px solid var(--edge)}
+.tbcell.grow{flex:1 1 auto}
+.tbk{display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:600;
+  letter-spacing:.17em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:1px}
+.tbv{display:block;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tbv.strong{font-weight:600}
+.tbv.wait{color:var(--plot)}
+/* the dot pulses so the block reads as waiting on you, not as a static label */
+.tbv.wait::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--plot);margin-right:7px;vertical-align:1px;animation:tbpulse 2s ease-in-out infinite}
+@keyframes tbpulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+.tbsteps{margin:9px 0 0;padding:0;list-style:none;counter-reset:tbstep;
+  display:flex;flex-wrap:wrap;gap:5px 20px}
+.tbsteps li{counter-increment:tbstep;position:relative;padding-left:23px;
+  font-size:12px;color:var(--ink-soft)}
+.tbsteps li::before{content:counter(tbstep);position:absolute;left:0;top:0;width:17px;height:17px;
+  border:1px solid var(--edge);border-radius:50%;font-family:"IBM Plex Mono",monospace;font-size:10px;
+  font-weight:600;color:var(--ink-soft);display:flex;align-items:center;justify-content:center}
+.tbsteps code{color:var(--ink)}
+
+/* one staggered reveal on load rather than scattered micro-animation */
+#blank .tb,#blank .tbsteps li{animation:tbin .5s cubic-bezier(.2,.7,.3,1) backwards}
+#blank .tb{animation-delay:.04s}
+#blank .tbsteps li:nth-child(1){animation-delay:.13s}
+#blank .tbsteps li:nth-child(2){animation-delay:.19s}
+#blank .tbsteps li:nth-child(3){animation-delay:.25s}
+@keyframes tbin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  #blank .tb,#blank .tbsteps li{animation:none}
+  .tbv.wait::before{animation:none}
+}
+

@@ -11,75 +11,42 @@ var off=document.createElement('canvas'), offc=off.getContext('2d');
 // identity-transform context used only for point-in-path classification
 var hitCv=document.createElement('canvas'), hitCtx=hitCv.getContext('2d');
 
-var S={
-  W:600,H:450,grid:25,snap:true,showGrid:true,labels:true,aa:true,
-  gridColor:'#c3cdc1',gridOpacity:1,gridWidth:1,gridMajor:4,gridStyle:'lines',solidView:false,
-  tool:'line', out:'frag',
-  view:{z:1,x:0,y:0},
-  layers:[],active:0,selLayers:[0],
-  sel:null,drag:null,hover:null,nextIsMove:false,
-  panDrag:null,imgDrag:null,newDrag:null,moveDrag:null,rotDrag:null,marquee:null,
-  scaleDrag:null,scaleMode:'geom',scaleEach:false,scaleLock:true,
-  bg:'#ffffff',bgSet:true,varPrefix:'',g2Name:'g2',precision:2,
-  fine:false,constrain:false,scaleMod:false,fineStep:1,fineKey:'alt',rotEach:false,
-  img:null,imgTop:false,imgLock:false,
-  measures:[],measMode:'span',measSel:-1,measShow:true,measGapFrom:-1,
-  measSnaps:['endpoint','midpoint','centre','quadrant','intersection','grid'],
-  measDraft:null,measDrag:null,measHover:null
-};
-var HIST=[],FUT=[];
-var GID=0;
+var model=window.PathPlotter.createModel(PALETTE), S=model.state;
+var L=model.L,
+    defaults=model.defaults,
+    polygonal=model.polygonal,
+    normalize=model.normalize,
+    nextGroupId=model.nextGroupId;
 
-function L(){ return S.layers[S.active]; }
+var scene=window.PathPlotter.createScene(S);
+var clipScopes=scene.clipScopes,
+    clipOwns=scene.clipOwns,
+    groups=scene.groups;
 
-function defaults(name,kind){
-  var c=PALETTE[S.layers.length%PALETTE.length];
-  return {name:name,kind:kind||'path',visible:true,group:null,
-    pts:[], g:{x:60,y:60,w:160,h:120,rx:0,ry:0,start:0,extent:270,arcType:'PIE'},
-    text:{s:'Hello',x:80,y:120,family:'SansSerif',size:32,bold:false,italic:false},
-    img:{src:'',name:''},
-    tex:{src:'',name:'',x:0,y:0,w:64,h:64},
-    render:'draw',paint:'solid',
-    fillColor:c,fillColor2:'#ffffff',gradAngle:0,alpha:1,
-    strokeColor:c,strokeW:2,
-    cap:'square',join:'miter',miter:10,dash:'',dashPhase:0,
-    closed:true,wind:'nonzero',shapeClass:'GeneralPath',combine:'none',isClip:false,clipped:false,collapsed:false,
-    tf:{rot:0,sx:1,sy:1,shx:0,shy:0}};
-}
-var CAPS={butt:1,round:1,square:1}, JOINS={miter:1,round:1,bevel:1};
-var SHAPECLASS={'GeneralPath':1,'Path2D.Double':1,'Path2D.Float':1,'Polygon':1};
-// java.awt.Polygon is one closed run of straight int-coordinate edges, nothing else
-function polygonal(l){
-  if(!l||l.kind!=='path'||!l.pts||l.pts.length<3) return false;
-  for(var i=0;i<l.pts.length;i++){
-    var c=l.pts[i].cmd;
-    if(i===0){ if(c!=='move') return false; continue; }
-    if(c!=='line') return false;
-  }
-  return true;
-}
-function normalize(l){
-  var d=defaults(l.name||'path',l.kind||'path');
-  var o=Object.assign(d,l);
-  o.g=Object.assign(d.g,l.g||{});
-  o.text=Object.assign(d.text,l.text||{});
-  o.img=Object.assign(d.img,l.img||{});
-  o.tex=Object.assign(d.tex,l.tex||{});
-  o.tf=Object.assign(d.tf,l.tf||{});
-  o.pts=l.pts||[];
-  o.group=l.group||null;
-  if(!CAPS[o.cap]) o.cap='square';
-  if(!JOINS[o.join]) o.join='miter';
-  o.miter=Math.max(1,parseFloat(o.miter)||10);
-  o.dash=typeof o.dash==='string'?o.dash:'';
-  o.dashPhase=parseFloat(o.dashPhase)||0;
-  if(!SHAPECLASS[o.shapeClass]) o.shapeClass='GeneralPath';
-  // Polygon has no winding rule and always closes, so keep the model honest
-  if(o.shapeClass==='Polygon'&&!polygonal(o)) o.shapeClass='GeneralPath';
-  if(o.shapeClass==='Polygon') o.closed=true;
-  if(o.group){ var n=parseInt(String(o.group).slice(1),10); if(n>GID) GID=n; }
-  return o;
-}
+var geometry=window.PathPlotter.createGeometry({state:S,textMetrics:textMetrics});
+var isCircularArc=geometry.isCircularArc,
+    arcAngleAt=geometry.arcAngleAt,
+    nearest=geometry.nearest,
+    hex2rgb=geometry.hex2rgb,
+    rgba=geometry.rgba,
+    norm=geometry.norm,
+    arcPoint=geometry.arcPoint,
+    arcDeriv=geometry.arcDeriv,
+    arcToCubics=geometry.arcToCubics,
+    layerBounds=geometry.layerBounds,
+    centreOf=geometry.centreOf,
+    hasTf=geometry.hasTf,
+    tfMatrix=geometry.tfMatrix,
+    relMatrix=geometry.relMatrix,
+    isIdentity=geometry.isIdentity,
+    gradEnds=geometry.gradEnds,
+    dashArray=geometry.dashArray,
+    isStrokeDefault=geometry.isStrokeDefault,
+    toPathPoints=geometry.toPathPoints,
+    ringsFromPts=geometry.ringsFromPts,
+    lerp=geometry.lerp,
+    segPoint=geometry.segPoint,
+    splitSeg=geometry.splitSeg;
 
 /* ================= selection & groups ================= */
 
@@ -148,30 +115,20 @@ function moveLayers(idxs,target){
 
 /* ================= history ================= */
 
-function snapshot(){
-  return JSON.stringify({layers:S.layers,active:S.active,sel:S.selLayers,W:S.W,H:S.H,
-    measures:S.measures,measSel:S.measSel});
-}
-function push(){ HIST.push(snapshot()); if(HIST.length>80) HIST.shift(); FUT.length=0; }
-function restore(str){
-  var st=JSON.parse(str);
-  var folds=S.layers.map(function(l){ return !!l.collapsed; });
-  S.layers=st.layers.map(normalize);
-  // fold is how the list is being read, not part of the drawing; a stale flag on
-  // a row that is no longer a base is inert, so index carry-over is enough
-  S.layers.forEach(function(l,i){ if(folds[i]!==undefined) l.collapsed=folds[i]; });
-  S.active=Math.min(st.active,st.layers.length-1);
-  S.selLayers=st.sel||[S.active];
-  S.W=st.W; S.H=st.H; S.sel=null;
-  S.measures=st.measures||[];
-  S.measSel=Math.min(st.measSel===undefined?-1:st.measSel,S.measures.length-1);
-  S.measDraft=null; S.measGapFrom=-1;
-  document.getElementById('w').value=S.W;
-  document.getElementById('h').value=S.H;
-  sync();
-}
-function undo(){ if(!HIST.length){ toast('Nothing to undo'); return; } FUT.push(snapshot()); restore(HIST.pop()); }
-function redo(){ if(!FUT.length){ toast('Nothing to redo'); return; } HIST.push(snapshot()); restore(FUT.pop()); }
+var history=window.PathPlotter.createHistory({
+  state:S, normalize:normalize, toast:toast,
+  onRestore:function(){
+    document.getElementById('w').value=S.W;
+    document.getElementById('h').value=S.H;
+    sync();
+  }
+});
+var HIST=history.past, FUT=history.future;
+var snapshot=history.snapshot,
+    push=history.push,
+    restore=history.restore,
+    undo=history.undo,
+    redo=history.redo;
 
 /* ================= image assets ================= */
 
@@ -205,55 +162,11 @@ function snapAngle(a){
   if(S.fine) return Math.round(a);
   return S.snap?Math.round(a/5)*5:Math.round(a);
 }
-function isCircularArc(l){
-  if(!l||l.kind!=='arc') return false;
-  var g=norm(l.g);
-  return Math.abs(g.w-g.h)<0.5;
-}
 // Arc2D angles are measured on the unit-squashed ellipse, not as true screen angles
-function arcAngleAt(l,x,y){
-  var g=norm(l.g), cx=g.x+g.w/2, cy=g.y+g.h/2;
-  var dx=(x-cx)/((g.w/2)||1), dy=(y-cy)/((g.h/2)||1);
-  return Math.atan2(-dy,dx)*180/Math.PI;
-}
 // keep a swept angle near its previous value instead of jumping a full turn
-function nearest(a,ref){
-  while(a-ref>180) a-=360;
-  while(ref-a>180) a+=360;
-  return a;
-}
-function hex2rgb(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; }
-function rgba(h,a){ var c=hex2rgb(h); return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')'; }
-function norm(g){ // positive width/height
-  return {x:g.w<0?g.x+g.w:g.x, y:g.h<0?g.y+g.h:g.y, w:Math.abs(g.w), h:Math.abs(g.h)};
-}
 
 // Java arc angles: counter-clockwise on screen, 0 at 3 o'clock
-function arcPoint(cx,cy,rx,ry,deg){
-  var t=deg*Math.PI/180;
-  return {x:cx+rx*Math.cos(t), y:cy-ry*Math.sin(t)};
-}
-function arcDeriv(rx,ry,deg){
-  var t=deg*Math.PI/180;
-  return {x:-rx*Math.sin(t), y:-ry*Math.cos(t)};
-}
 // cubic segments approximating an elliptical arc
-function arcToCubics(cx,cy,rx,ry,start,extent){
-  var segs=Math.max(1,Math.ceil(Math.abs(extent)/90));
-  var step=extent/segs, out=[], a=start;
-  for(var i=0;i<segs;i++){
-    var b=a+step;
-    var p0=arcPoint(cx,cy,rx,ry,a), p1=arcPoint(cx,cy,rx,ry,b);
-    var d0=arcDeriv(rx,ry,a), d1=arcDeriv(rx,ry,b);
-    var alpha=(4/3)*Math.tan((step*Math.PI/180)/4);
-    out.push({p0:p0,
-      c1:{x:p0.x+alpha*d0.x, y:p0.y+alpha*d0.y},
-      c2:{x:p1.x-alpha*d1.x, y:p1.y-alpha*d1.y},
-      p1:p1});
-    a=b;
-  }
-  return out;
-}
 
 function shapePath(l){
   if(l.kind==='text'||l.kind==='image') return null;
@@ -321,30 +234,6 @@ function fontCSS(l){
   return (l.text.italic?'italic ':'')+(l.text.bold?'bold ':'')+l.text.size+'px '+fam;
 }
 
-function layerBounds(l){
-  if(l.kind==='path'){
-    if(!l.pts.length) return null;
-    var b={x0:1e9,y0:1e9,x1:-1e9,y1:-1e9};
-    function acc(x,y){ b.x0=Math.min(b.x0,x);b.y0=Math.min(b.y0,y);b.x1=Math.max(b.x1,x);b.y1=Math.max(b.y1,y); }
-    l.pts.forEach(function(p){ acc(p.x,p.y);
-      if(p.cmd==='quad') acc(p.cx,p.cy);
-      if(p.cmd==='cubic'){ acc(p.c1x,p.c1y); acc(p.c2x,p.c2y); } });
-    return b;
-  }
-  if(l.kind==='text'){
-    var m=textMetrics(l);
-    var lines=String(l.text.s||'').split('\n').length;
-    return {x0:l.text.x,y0:l.text.y-l.text.size,
-            x1:l.text.x+m.w,y1:l.text.y+l.text.size*(1.2*(lines-1))+l.text.size*0.25};
-  }
-  var g=norm(l.g);
-  return {x0:g.x,y0:g.y,x1:g.x+g.w,y1:g.y+g.h};
-}
-function centreOf(l){
-  var b=layerBounds(l);
-  if(!b) return {x:S.W/2,y:S.H/2};
-  return {x:(b.x0+b.x1)/2,y:(b.y0+b.y1)/2};
-}
 function selBounds(){
   var b=null;
   S.selLayers.forEach(function(i){
@@ -355,9 +244,6 @@ function selBounds(){
   });
   return b;
 }
-function hasTf(l){
-  var t=l.tf; return t.rot!==0||t.sx!==1||t.sy!==1||t.shx!==0||t.shy!==0;
-}
 function applyTf(c,l){
   if(!hasTf(l)) return false;
   var ctr=centreOf(l), t=l.tf;
@@ -367,18 +253,6 @@ function applyTf(c,l){
   if(t.shx||t.shy) c.transform(1,t.shy,t.shx,1,0,0);
   c.translate(-ctr.x,-ctr.y);
   return true;
-}
-function tfMatrix(l){
-  if(!window.DOMMatrix||!hasTf(l)) return null;
-  try{
-    var c=centreOf(l),t=l.tf,m=new DOMMatrix();
-    m=m.translate(c.x,c.y);
-    if(t.rot) m=m.rotate(t.rot);
-    if(t.sx!==1||t.sy!==1) m=m.scale(t.sx,t.sy);
-    if(t.shx||t.shy) m=m.multiply(new DOMMatrix([1,t.shy,t.shx,1,0,0]));
-    m=m.translate(-c.x,-c.y);
-    return m;
-  }catch(err){ return null; }
 }
 // maps stored geometry to the on-sheet position you actually see
 function tfMapper(l){
@@ -401,19 +275,6 @@ function unTf(l,x,y){
 
 /* ================= paint & stroke ================= */
 
-function gradEnds(l){
-  var b=layerBounds(l);
-  if(!b) return {x1:0,y1:0,x2:100,y2:0,cx:50,cy:0,r:50};
-  var cx=(b.x0+b.x1)/2, cy=(b.y0+b.y1)/2;
-  var w=b.x1-b.x0, h=b.y1-b.y0;
-  var a=(l.gradAngle||0)*Math.PI/180;
-  var dx=Math.cos(a), dy=Math.sin(a);
-  var half=(Math.abs(dx)*w+Math.abs(dy)*h)/2 || 1;
-  return {x1:Math.round(cx-dx*half),y1:Math.round(cy-dy*half),
-          x2:Math.round(cx+dx*half),y2:Math.round(cy+dy*half),
-          cx:Math.round(cx),cy:Math.round(cy),
-          r:Math.max(1,Math.round(Math.max(w,h)/2))};
-}
 function paintFor(c,l){
   if(l.paint==='linear'){
     var e=gradEnds(l);
@@ -440,16 +301,6 @@ function paintFor(c,l){
   }
   return l.fillColor;
 }
-function dashArray(l){
-  if(!l.dash) return null;
-  var a=String(l.dash).split(/[\s,]+/)
-        .map(function(s){ return parseFloat(s); })
-        .filter(function(n){ return !isNaN(n)&&n>=0; });
-  if(!a.length) return null;
-  var sum=0; a.forEach(function(n){ sum+=n; });
-  if(sum<=0) return null;
-  return a;
-}
 var CAP_CSS={butt:'butt',round:'round',square:'square'};
 function applyStroke(c,l,z){
   c.strokeStyle=l.strokeColor;
@@ -461,59 +312,9 @@ function applyStroke(c,l,z){
   if(d){ c.setLineDash(d.map(function(n){ return n/z; })); c.lineDashOffset=(l.dashPhase||0)/z; }
   else { c.setLineDash([]); c.lineDashOffset=0; }
 }
-function isStrokeDefault(l){
-  return l.cap==='square'&&l.join==='miter'&&Math.abs((l.miter||10)-10)<1e-9&&!dashArray(l);
-}
 
 /* ---- convert a primitive into editable path points ---- */
 
-function toPathPoints(l){
-  var g=norm(l.g), pts=[];
-  var R=Math.round;
-  function cub(c1,c2,p){ pts.push({cmd:'cubic',c1x:R(c1.x),c1y:R(c1.y),c2x:R(c2.x),c2y:R(c2.y),x:R(p.x),y:R(p.y)}); }
-  if(l.kind==='rect'||l.kind==='image'){
-    var rx=(l.kind==='image')?0:Math.min(l.g.rx||0,g.w/2);
-    var ry=(l.kind==='image')?0:Math.min(l.g.ry||0,g.h/2);
-    if(rx>0&&ry>0){
-      pts.push({cmd:'move',x:R(g.x+rx),y:R(g.y)});
-      pts.push({cmd:'line',x:R(g.x+g.w-rx),y:R(g.y)});
-      cub({x:g.x+g.w-rx+rx*K,y:g.y},{x:g.x+g.w,y:g.y+ry-ry*K},{x:g.x+g.w,y:g.y+ry});
-      pts.push({cmd:'line',x:R(g.x+g.w),y:R(g.y+g.h-ry)});
-      cub({x:g.x+g.w,y:g.y+g.h-ry+ry*K},{x:g.x+g.w-rx+rx*K,y:g.y+g.h},{x:g.x+g.w-rx,y:g.y+g.h});
-      pts.push({cmd:'line',x:R(g.x+rx),y:R(g.y+g.h)});
-      cub({x:g.x+rx-rx*K,y:g.y+g.h},{x:g.x,y:g.y+g.h-ry+ry*K},{x:g.x,y:g.y+g.h-ry});
-      pts.push({cmd:'line',x:R(g.x),y:R(g.y+ry)});
-      cub({x:g.x,y:g.y+ry-ry*K},{x:g.x+rx-rx*K,y:g.y},{x:g.x+rx,y:g.y});
-    } else {
-      pts.push({cmd:'move',x:R(g.x),y:R(g.y)});
-      pts.push({cmd:'line',x:R(g.x+g.w),y:R(g.y)});
-      pts.push({cmd:'line',x:R(g.x+g.w),y:R(g.y+g.h)});
-      pts.push({cmd:'line',x:R(g.x),y:R(g.y+g.h)});
-    }
-    return pts;
-  }
-  if(l.kind==='ellipse'){
-    var cx=g.x+g.w/2, cy=g.y+g.h/2, ax=g.w/2, ay=g.h/2;
-    pts.push({cmd:'move',x:R(cx+ax),y:R(cy)});
-    cub({x:cx+ax,y:cy+ay*K},{x:cx+ax*K,y:cy+ay},{x:cx,y:cy+ay});
-    cub({x:cx-ax*K,y:cy+ay},{x:cx-ax,y:cy+ay*K},{x:cx-ax,y:cy});
-    cub({x:cx-ax,y:cy-ay*K},{x:cx-ax*K,y:cy-ay},{x:cx,y:cy-ay});
-    cub({x:cx+ax*K,y:cy-ay},{x:cx+ax,y:cy-ay*K},{x:cx+ax,y:cy});
-    return pts;
-  }
-  if(l.kind==='arc'){
-    var ccx=g.x+g.w/2, ccy=g.y+g.h/2;
-    var cubs=arcToCubics(ccx,ccy,g.w/2,g.h/2,l.g.start,l.g.extent);
-    if(!cubs.length) return pts;
-    if(l.g.arcType==='PIE'){
-      pts.push({cmd:'move',x:R(ccx),y:R(ccy)});
-      pts.push({cmd:'line',x:R(cubs[0].p0.x),y:R(cubs[0].p0.y)});
-    } else pts.push({cmd:'move',x:R(cubs[0].p0.x),y:R(cubs[0].p0.y)});
-    cubs.forEach(function(s){ cub(s.c1,s.c2,s.p1); });
-    return pts;
-  }
-  return pts;
-}
 
 /* ================= flattening & boolean geometry =================
    Java's Area works on real paths, so the on-screen Area preview has to as
@@ -521,36 +322,7 @@ function toPathPoints(l){
    outline. Everything below turns a group into honest polygon rings, which
    fill AND stroke the same way g2.fill(area) / g2.draw(area) do. */
 
-var BSTEP=16;
 
-function ringsFromPts(pts){
-  var rings=[],cur=null;
-  function close(){
-    if(cur&&cur.length>=3){
-      var a=cur[0], b=cur[cur.length-1];
-      if(Math.abs(a.x-b.x)<1e-9&&Math.abs(a.y-b.y)<1e-9) cur.pop();
-      if(cur.length>=3) rings.push(cur);
-    }
-    cur=null;
-  }
-  for(var i=0;i<pts.length;i++){
-    var p=pts[i];
-    if(p.cmd==='move'){ close(); cur=[{x:p.x,y:p.y}]; continue; }
-    if(!cur) cur=[{x:p.x,y:p.y}];
-    var p0=cur[cur.length-1], k, t, u;
-    if(p.cmd==='line') cur.push({x:p.x,y:p.y});
-    else if(p.cmd==='quad'){
-      for(k=1;k<=BSTEP;k++){ t=k/BSTEP; u=1-t;
-        cur.push({x:u*u*p0.x+2*u*t*p.cx+t*t*p.x, y:u*u*p0.y+2*u*t*p.cy+t*t*p.y}); }
-    } else if(p.cmd==='cubic'){
-      for(k=1;k<=BSTEP;k++){ t=k/BSTEP; u=1-t;
-        cur.push({x:u*u*u*p0.x+3*u*u*t*p.c1x+3*u*t*t*p.c2x+t*t*t*p.x,
-                  y:u*u*u*p0.y+3*u*u*t*p.c1y+3*u*t*t*p.c2y+t*t*t*p.y}); }
-    }
-  }
-  close();
-  return rings;
-}
 
 function flattenLayer(l){
   if(l.kind==='text') return textRings(l);
@@ -769,19 +541,6 @@ function memberRings(l,baseInv){
       });
     });
   }catch(e){ return rings; }
-}
-function relMatrix(l,baseInv){
-  var m=tfMatrix(l);
-  try{
-    if(baseInv&&m) return baseInv.multiply(m);
-    if(baseInv) return baseInv;
-    return m;
-  }catch(e){ return null; }
-}
-function isIdentity(m){
-  if(!m) return true;
-  return Math.abs(m.a-1)<1e-9&&Math.abs(m.b)<1e-9&&Math.abs(m.c)<1e-9&&
-         Math.abs(m.d-1)<1e-9&&Math.abs(m.e)<1e-9&&Math.abs(m.f)<1e-9;
 }
 
 var BOOLCACHE=Object.create(null), BOOLKEYS=[];
@@ -1184,35 +943,6 @@ function hitHandle(x,y){
   }
   return best;
 }
-function lerp(a,b,t){ return a+(b-a)*t; }
-function segPoint(prev,p,t){
-  if(p.cmd==='line') return {x:lerp(prev.x,p.x,t),y:lerp(prev.y,p.y,t)};
-  if(p.cmd==='quad'){ var u=1-t;
-    return {x:u*u*prev.x+2*u*t*p.cx+t*t*p.x, y:u*u*prev.y+2*u*t*p.cy+t*t*p.y}; }
-  var v=1-t;
-  return {x:v*v*v*prev.x+3*v*v*t*p.c1x+3*v*t*t*p.c2x+t*t*t*p.x,
-          y:v*v*v*prev.y+3*v*v*t*p.c1y+3*v*t*t*p.c2y+t*t*t*p.y};
-}
-function splitSeg(prev,p,t){
-  var R=Math.round;
-  if(p.cmd==='line'){ var m=segPoint(prev,p,t);
-    return [{cmd:'line',x:R(m.x),y:R(m.y)},{cmd:'line',x:p.x,y:p.y}]; }
-  if(p.cmd==='quad'){
-    var ax=lerp(prev.x,p.cx,t),ay=lerp(prev.y,p.cy,t);
-    var bx=lerp(p.cx,p.x,t),by=lerp(p.cy,p.y,t);
-    var mx=lerp(ax,bx,t),my=lerp(ay,by,t);
-    return [{cmd:'quad',cx:R(ax),cy:R(ay),x:R(mx),y:R(my)},
-            {cmd:'quad',cx:R(bx),cy:R(by),x:p.x,y:p.y}];
-  }
-  var Ax=lerp(prev.x,p.c1x,t),Ay=lerp(prev.y,p.c1y,t);
-  var Bx=lerp(p.c1x,p.c2x,t),By=lerp(p.c1y,p.c2y,t);
-  var Cx=lerp(p.c2x,p.x,t),Cy=lerp(p.c2y,p.y,t);
-  var Dx=lerp(Ax,Bx,t),Dy=lerp(Ay,By,t);
-  var Ex=lerp(Bx,Cx,t),Ey=lerp(By,Cy,t);
-  var Mx=lerp(Dx,Ex,t),My=lerp(Dy,Ey,t);
-  return [{cmd:'cubic',c1x:R(Ax),c1y:R(Ay),c2x:R(Dx),c2y:R(Dy),x:R(Mx),y:R(My)},
-          {cmd:'cubic',c1x:R(Ex),c1y:R(Ey),c2x:R(Cx),c2y:R(Cy),x:p.x,y:p.y}];
-}
 function insertAt(sx,sy){
   var l=L(); if(l.kind!=='path') return false;
   var q=unTf(l,sx,sy);
@@ -1293,15 +1023,6 @@ function resize(){
 // A clip region owns the run of `clipped` layers that follows it. A clipped clip
 // nests inside the one above (its region intersects); an unclipped layer closes
 // every open scope. Returns, per layer, the stack of clip indices enclosing it.
-function clipScopes(){
-  var out=new Array(S.layers.length), stack=[];
-  S.layers.forEach(function(l,i){
-    if(!l.clipped) stack=[];          // an unclipped layer ends every open scope
-    out[i]=stack.slice();             // the scopes this layer is painted inside
-    if(l.isClip) stack=stack.concat([i]);
-  });
-  return out;
-}
 // which rows a collapsed base is hiding. A clip region folds away everything in
 // its scope (nested regions included); a boolean base folds the run merged into it
 function collapsedRows(){
@@ -1331,22 +1052,6 @@ function foldCount(i){
 }
 function clipDepth(i){ var sc=clipScopes(); return sc[i]?sc[i].length:0; }
 // a clip region with nothing under it silently does nothing; worth saying so
-function clipOwns(i){
-  var n=0;
-  for(var j=i+1;j<S.layers.length;j++){ if(!S.layers[j].clipped) break; n++; }
-  return n;
-}
-function groups(){
-  var gs=[];
-  S.layers.forEach(function(l){
-    if(!l.visible) return;
-    var last=gs.length?gs[gs.length-1]:null;
-    if(!last||l.combine==='none'||l.isClip||l.kind==='image'
-       ||last[0].isClip||last[0].kind==='image') gs.push([l]);
-    else gs[gs.length-1].push(l);
-  });
-  return gs;
-}
 var COMPOSITE={add:'source-over',subtract:'destination-out',
                intersect:'destination-in',exclusiveOr:'xor'};
 
@@ -1848,516 +1553,40 @@ function renderThumb(cv,l){
 
 /* ================= code generation ================= */
 
-var RESERVED={"abstract":1,"assert":1,"boolean":1,"break":1,"byte":1,"case":1,"catch":1,"char":1,
-"class":1,"const":1,"continue":1,"default":1,"do":1,"double":1,"else":1,"enum":1,"extends":1,
-"final":1,"finally":1,"float":1,"for":1,"goto":1,"if":1,"implements":1,"import":1,"instanceof":1,
-"int":1,"interface":1,"long":1,"native":1,"new":1,"package":1,"private":1,"protected":1,"public":1,
-"return":1,"short":1,"static":1,"strictfp":1,"super":1,"switch":1,"synchronized":1,"this":1,
-"throw":1,"throws":1,"transient":1,"try":1,"void":1,"volatile":1,"while":1,"true":1,"false":1,"null":1};
+var java=window.PathPlotter.createJavaGenerator({
+  state:S,
+  getBuildOnce:function(){ return document.getElementById('buildOnce').checked; },
+  getClassName:function(){ return document.getElementById('className').value; },
+  hex2rgb:hex2rgb,
+  norm:norm,
+  polygonal:polygonal,
+  relMatrix:relMatrix,
+  isIdentity:isIdentity,
+  gradEnds:gradEnds,
+  isStrokeDefault:isStrokeDefault,
+  dashArray:dashArray,
+  hasTf:hasTf,
+  centreOf:centreOf,
+  groups:groups,
+  clipScopes:clipScopes,
+  clipOwns:clipOwns,
+  tfMatrix:tfMatrix
+});
+var javaIdent=java.javaIdent,
+    g2n=java.g2n,
+    javaBase=java.javaBase,
+    javaName=java.javaName,
+    nameClashes=java.nameClashes,
+    cap=java.cap,
+    roundTo=java.roundTo,
+    num=java.num,
+    declParts=java.declParts,
+    tfBake=java.tfBake,
+    classNameOf=java.classNameOf,
+    outputText=java.outputText,
+    generate=java.generate,
+    fullClass=java.fullClass;
 
-function javaIdent(raw){
-  var words=String(raw).replace(/[^A-Za-z0-9]+/g,' ').trim().split(/\s+/),id='';
-  words.forEach(function(w,i){
-    if(!w) return;
-    id += i===0 ? w.charAt(0).toLowerCase()+w.slice(1) : w.charAt(0).toUpperCase()+w.slice(1);
-  });
-  return id;
-}
-// the Graphics2D variable the emitted code paints through. Everything that writes
-// a paint statement goes through this, so one setting renames the whole output.
-function g2n(){ return S.g2Name||'g2'; }
-// the identifier a name wants, before anything is done about collisions. The
-// prefix keeps generated fields clear of whatever the target class already has;
-// the class name itself asks for the plain form.
-function javaBase(raw,plain){
-  var id=javaIdent(raw);
-  var pfx=plain?'':(S.varPrefix||'');
-  if(pfx) id=pfx+cap(id||'shape');
-  if(!id||/^[0-9]/.test(id)) id='shape'+id;
-  if(RESERVED[id]) id=id+'Shape';
-  return id;
-}
-function javaName(raw,used,plain){
-  var base=javaBase(raw,plain),id=base,n=2;
-  while(used[id]){ id=base+'_'+n; n++; }
-  used[id]=1; return id;
-}
-// two names can camel-case down to the same identifier, and the generator then
-// quietly suffixes the loser; the shape list says so rather than let it surprise
-function nameClashes(){
-  var seen={},dup={};
-  S.layers.forEach(function(l){
-    var id=javaBase(l.name);
-    if(seen[id]) dup[id]=1; else seen[id]=1;
-  });
-  return dup;
-}
-function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
-// Every coordinate in the output goes through here. toFixed is what kills the
-// float residue: Math.round(n*100)/100 cannot, because dividing puts it back.
-// Trailing zeros are stripped -- the output has always been terse.
-function roundTo(n,dp){
-  var v=parseFloat(n);
-  if(!isFinite(v)) return '0';
-  dp=Math.max(0,Math.min(6,dp|0));
-  var s=v.toFixed(dp);
-  if(dp>0) s=s.replace(/([.][0-9]*?)0+$/,'$1').replace(/[.]$/,'');
-  return (s===''||s==='-0')?'0':s;
-}
-function num(n){ return roundTo(n,2); }
-// every length or position the drawing is made of; the one the setting moves
-function coord(n){ return roundTo(n,S.precision); }
-function num6(n){ return (Math.round(n*1e6)/1e6).toString(); }
-function colorExpr(hex){ var c=hex2rgb(hex); return 'new Color('+c[0]+', '+c[1]+', '+c[2]+')'; }
-function jstr(s){
-  return '"'+String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"')
-    .replace(/\n/g,'\\n').replace(/\r/g,'').replace(/\t/g,'\\t')+'"';
-}
-
-var IMGVARS={}, USED_IMAGES=false, USED_FRC=false;
-function collectImages(used){
-  IMGVARS={};
-  var out=[];
-  function add(src,name){
-    if(!src||IMGVARS[src]) return;
-    var stem=String(name||'image').replace(/\.[A-Za-z0-9]+$/,'')||'image';
-    var v=javaName('img '+stem,used);
-    IMGVARS[src]=v;
-    out.push({v:v,name:name||'image.png',src:src});
-  }
-  S.layers.forEach(function(l){
-    if(!l.visible) return;
-    if(l.kind==='image'&&l.img&&l.img.src) add(l.img.src,l.img.name);
-    if(l.paint==='texture'&&l.tex&&l.tex.src) add(l.tex.src,l.tex.name);
-  });
-  return out;
-}
-
-function fontDecl(v,l){
-  var style = l.text.bold&&l.text.italic ? 'Font.BOLD | Font.ITALIC'
-            : l.text.bold ? 'Font.BOLD' : l.text.italic ? 'Font.ITALIC' : 'Font.PLAIN';
-  return 'Font font'+cap(v)+' = new Font('+jstr(l.text.family)+', '+style+', '+l.text.size+');\n';
-}
-// text as a real Shape, so it can join an Area the same way a path can
-// Shapes are declared either inline (everything inside paintComponent) or split
-// into a field plus a build step, so they are constructed once instead of on
-// every repaint. `asField` picks which; `frcVar` is needed because glyph outlines
-// want a FontRenderContext, and g2 does not exist outside paint.
-function textParts(v,l,asField,frcVar){
-  var lines=String(l.text.s||'').split('\n');
-  var type=(lines.length===1)?'Shape':'Area';
-  function outline(i){
-    return 'font'+cap(v)+'.createGlyphVector('+frcVar+', '+jstr(lines[i])+')\n'
-         +'        .getOutline('+coord(l.text.x)+'f, '+coord(l.text.y+i*l.text.size*1.2)+'f)';
-  }
-  var body=fontDecl(v,l), i;
-  if(asField){
-    body+=v+' = '+(type==='Area'?('new Area('+outline(0)+')'):outline(0))+';\n';
-    for(i=1;i<lines.length;i++) body+=v+'.add(new Area('+outline(i)+'));\n';
-    return {field:'private '+type+' '+v+';\n', build:body};
-  }
-  body+=type+' '+v+' = '+(type==='Area'?('new Area('+outline(0)+')'):outline(0))+';\n';
-  for(i=1;i<lines.length;i++) body+=v+'.add(new Area('+outline(i)+'));\n';
-  return {field:body, build:''};
-}
-
-function primitiveExpr(l){
-  var g=norm(l.g);
-  if(l.kind==='rect'){
-    var rx=Math.min(l.g.rx||0,g.w/2), ry=Math.min(l.g.ry||0,g.h/2);
-    if(rx>0&&ry>0) return {type:'RoundRectangle2D',
-      ctor:'new RoundRectangle2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)
-          +', '+coord(rx*2)+', '+coord(ry*2)+')'};
-    return {type:'Rectangle2D',
-      ctor:'new Rectangle2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)+')'};
-  }
-  if(l.kind==='ellipse') return {type:'Ellipse2D',
-    ctor:'new Ellipse2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)+')'};
-  if(l.kind==='arc') return {type:'Arc2D',
-    ctor:'new Arc2D.Double('+coord(g.x)+', '+coord(g.y)+', '+coord(g.w)+', '+coord(g.h)+', '
-        +num(l.g.start)+', '+num(l.g.extent)+', Arc2D.'+l.g.arcType+')'};
-  return null;
-}
-
-function declParts(v,l,asField,frcVar){
-  if(l.kind==='image') return {field:'',build:''};
-  if(l.kind==='text') return textParts(v,l,asField,frcVar||g2n()+'.getFontRenderContext()');
-  if(l.kind==='path'){
-    var cls=l.shapeClass||'GeneralPath';
-    if(cls==='Polygon'&&polygonal(l)){
-      var xs=[],ys=[];
-      l.pts.forEach(function(p){ xs.push(Math.round(p.x)); ys.push(Math.round(p.y)); });
-      var arrays='int[] '+v+'X = {'+xs.join(', ')+'};\n'
-                +'int[] '+v+'Y = {'+ys.join(', ')+'};\n';
-      var make='new Polygon('+v+'X, '+v+'Y, '+xs.length+')';
-      if(asField) return {field:'private Polygon '+v+';\n', build:arrays+v+' = '+make+';\n'};
-      return {field:arrays+'Polygon '+v+' = '+make+';\n', build:''};
-    }
-    if(cls==='Polygon') cls='GeneralPath';   // curves crept in since it was picked
-    var wind=(l.wind==='evenodd')
-      ? (cls==='GeneralPath'?'GeneralPath.WIND_EVEN_ODD':'Path2D.WIND_EVEN_ODD') : '';
-    var ctor='new '+cls+'('+wind+')';
-    var body='', open=false;
-    l.pts.forEach(function(p){
-      if(p.cmd==='move'){
-        if(open&&l.closed) body+=v+'.closePath();\n';
-        body+=v+'.moveTo('+coord(p.x)+', '+coord(p.y)+');\n'; open=true;
-      }
-      else if(p.cmd==='line')  body+=v+'.lineTo('+coord(p.x)+', '+coord(p.y)+');\n';
-      else if(p.cmd==='quad')  body+=v+'.quadTo('+coord(p.cx)+', '+coord(p.cy)+', '+coord(p.x)+', '+coord(p.y)+');\n';
-      else if(p.cmd==='cubic') body+=v+'.curveTo('+coord(p.c1x)+', '+coord(p.c1y)+', '+coord(p.c2x)+', '+coord(p.c2y)+', '+coord(p.x)+', '+coord(p.y)+');\n';
-    });
-    if(open&&l.closed) body+=v+'.closePath();\n';
-    if(asField) return {field:'private final '+cls+' '+v+' = '+ctor+';\n', build:body};
-    return {field:cls+' '+v+' = '+ctor+';\n', build:body};
-  }
-  var e=primitiveExpr(l);
-  if(!e) return {field:'',build:''};
-  if(asField) return {field:'private final '+e.type+' '+v+' = '+e.ctor+';\n', build:''};
-  return {field:e.type+' '+v+' = '+e.ctor+';\n', build:''};
-}
-
-// a group member keeps its own transform by baking it into the shape
-function tfBake(v,l,baseInv){
-  var m=relMatrix(l,baseInv);
-  if(isIdentity(m)) return {code:'',name:v};
-  var tv='tx'+cap(v);
-  return {code:'AffineTransform '+tv+' = new AffineTransform('
-      +num6(m.a)+', '+num6(m.b)+', '+num6(m.c)+', '
-      +num6(m.d)+', '+num6(m.e)+', '+num6(m.f)+');\n'
-      +'Shape '+v+'T = '+tv+'.createTransformedShape('+v+');\n',
-    name:v+'T'};
-}
-
-function paintStmt(l){
-  if(l.paint==='linear'){
-    var e=gradEnds(l);
-    return g2n()+'.setPaint(new GradientPaint('+coord(e.x1)+'f, '+coord(e.y1)+'f, '+colorExpr(l.fillColor)
-         +', '+coord(e.x2)+'f, '+coord(e.y2)+'f, '+colorExpr(l.fillColor2)+'));\n';
-  }
-  if(l.paint==='radial'){
-    var q=gradEnds(l);
-    return g2n()+'.setPaint(new RadialGradientPaint(new Point2D.Float('+coord(q.cx)+'f, '+coord(q.cy)+'f), '
-         +coord(q.r)+'f,\n        new float[]{0f, 1f},\n        new Color[]{'
-         +colorExpr(l.fillColor)+', '+colorExpr(l.fillColor2)+'}));\n';
-  }
-  if(l.paint==='texture'&&l.tex&&l.tex.src&&IMGVARS[l.tex.src]){
-    return g2n()+'.setPaint(new TexturePaint('+IMGVARS[l.tex.src]+', new Rectangle2D.Double('
-         +coord(l.tex.x)+', '+coord(l.tex.y)+', '+coord(l.tex.w)+', '+coord(l.tex.h)+')));\n';
-  }
-  return g2n()+'.setColor('+colorExpr(l.fillColor)+');\n';
-}
-
-function strokeStmt(l){
-  var w=num(l.strokeW)+'f';
-  var d=dashArray(l);
-  if(isStrokeDefault(l)) return g2n()+'.setStroke(new BasicStroke('+w+'));\n';
-  var capC='BasicStroke.CAP_'+String(l.cap).toUpperCase();
-  var joinC='BasicStroke.JOIN_'+String(l.join).toUpperCase();
-  var ml=num(Math.max(1,l.miter||10))+'f';
-  if(!d) return g2n()+'.setStroke(new BasicStroke('+w+', '+capC+', '+joinC+', '+ml+'));\n';
-  return g2n()+'.setStroke(new BasicStroke('+w+', '+capC+', '+joinC+', '+ml+',\n'
-       +'        new float[]{'+d.map(function(n){ return num(n)+'f'; }).join(', ')+'}, '
-       +num(l.dashPhase||0)+'f));\n';
-}
-
-function tfOpen(l,v){
-  if(!hasTf(l)) return '';
-  var c=centreOf(l), t=l.tf, s='';
-  s+='AffineTransform tx'+cap(v)+' = '+g2n()+'.getTransform();\n';
-  s+=g2n()+'.translate('+coord(c.x)+', '+coord(c.y)+');\n';
-  if(t.rot) s+=g2n()+'.rotate(Math.toRadians('+num(t.rot)+'));\n';
-  if(t.sx!==1||t.sy!==1) s+=g2n()+'.scale('+num(t.sx)+', '+num(t.sy)+');\n';
-  if(t.shx||t.shy) s+=g2n()+'.shear('+num(t.shx)+', '+num(t.shy)+');\n';
-  s+=g2n()+'.translate('+coord(-c.x)+', '+coord(-c.y)+');\n';
-  return s;
-}
-function tfClose(l,v){ return hasTf(l)?(g2n()+'.setTransform(tx'+cap(v)+');\n'):''; }
-function alphaOpen(l,v){
-  if(l.alpha===undefined||l.alpha>=1) return '';
-  return 'Composite comp'+cap(v)+' = '+g2n()+'.getComposite();\n'
-       + g2n()+'.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, '+num(l.alpha)+'f));\n';
-}
-function alphaClose(l,v){
-  return (l.alpha===undefined||l.alpha>=1)?'':(g2n()+'.setComposite(comp'+cap(v)+');\n');
-}
-
-function textBlock(l,v){
-  var out=fontDecl(v,l);
-  out+=g2n()+'.setFont(font'+cap(v)+');\n';
-  var lines=String(l.text.s||'').split('\n');
-  lines.forEach(function(line,i){
-    var yy=Math.round(l.text.y+i*l.text.size*1.2);
-    if(l.render==='fill'||l.render==='both'){
-      out+=paintStmt(l);
-      out+=g2n()+'.drawString('+jstr(line)+', '+coord(l.text.x)+', '+yy+');\n';
-    }
-    if(l.render==='draw'||l.render==='both'){
-      out+='Shape outline'+cap(v)+(i?String(i+1):'')+' = font'+cap(v)
-         +'.createGlyphVector('+g2n()+'.getFontRenderContext(), '+jstr(line)+')\n'
-         +'        .getOutline('+coord(l.text.x)+'f, '+yy+'f);\n';
-      out+=g2n()+'.setColor('+colorExpr(l.strokeColor)+');\n';
-      out+=strokeStmt(l);
-      out+=g2n()+'.draw(outline'+cap(v)+(i?String(i+1):'')+');\n';
-    }
-  });
-  return out;
-}
-
-function drawableIn(l){
-  if(l.kind==='text') return String(l.text.s||'').length>0;
-  if(l.kind==='image') return !!(l.img&&l.img.src);
-  if(l.kind==='path') return l.pts.length>0;
-  var g=norm(l.g); return g.w>0&&g.h>0;
-}
-
-function buildOnceOn(){
-  var el=document.getElementById('buildOnce');
-  return !!(el&&el.checked);
-}
-
-// Produces three streams. In "build once" mode the shapes become fields built a
-// single time; otherwise everything lands in the paint stream exactly as before.
-function genParts(split){
-  var used={}, F='', B='', P='', first=true;
-  var SC=clipScopes(), clipStack=[];   // saved-clip names, innermost last
-  var frc=split?'FRC':g2n()+'.getFontRenderContext()';
-  var imgs=collectImages(used);
-  USED_IMAGES=imgs.length>0;
-  USED_FRC=false;
-
-  if(imgs.length){
-    if(split){
-      imgs.forEach(function(im){ F+='private BufferedImage '+im.v+';\n'; });
-      B+='// keep these files beside the class\n';
-      B+='try {\n';
-      imgs.forEach(function(im){ B+='    '+im.v+' = ImageIO.read(new File('+jstr(im.name)+'));\n'; });
-      B+='} catch (IOException ex) {\n    ex.printStackTrace();\n}\n';
-    } else {
-      P+='// images: keep these files beside the class\n';
-      imgs.forEach(function(im){ P+='BufferedImage '+im.v+' = null;\n'; });
-      P+='try {\n';
-      imgs.forEach(function(im){ P+='    '+im.v+' = ImageIO.read(new File('+jstr(im.name)+'));\n'; });
-      P+='} catch (IOException ex) {\n    ex.printStackTrace();\n}\n';
-      first=false;
-    }
-  }
-  function put(parts){
-    if(split){ F+=parts.field; B+=parts.build; }
-    else { P+=parts.field+parts.build; }
-  }
-  function local(parts){   // group members are only used while building the Area
-    if(split){ B+=parts.field+parts.build; }
-    else { P+=parts.field+parts.build; }
-  }
-
-  groups().forEach(function(grp){
-    var base=grp[0];
-    var drawable=grp.filter(drawableIn);
-    if(!drawable.length) return;
-    // An empty member is dropped above because add, subtract and exclusiveOr all
-    // leave the running Area alone -- but intersect does not, it empties it, and
-    // quietly dropping the member would have the code draw a shape the sheet does
-    // not. Java would arrive at nothing here, so the output says nothing too.
-    var emptied=grp.some(function(l,i){
-      return i>0&&!drawableIn(l)&&l.combine==='intersect';
-    });
-    if(emptied){
-      if(!first) P+='\n';
-      first=false;
-      P+='// '+base.name+': an empty shape is intersected into this run, so the Area\n'
-        +'// comes out empty and there is nothing to paint\n';
-      return;
-    }
-    if(!first) P+='\n';
-    first=false;
-
-    // leaving a clip's run restores whatever clip was active before it
-    var bi=S.layers.indexOf(base), bd=(bi>=0&&SC[bi])?SC[bi].length:0;
-    var closed=0;
-    while(clipStack.length>bd){ P+=g2n()+'.setClip('+clipStack.pop()+');\n'; closed++; }
-    if(closed) P+='\n';           // let the restored scope breathe
-
-    if(base.isClip&&grp.length===1){
-      if(!clipOwns(bi)) return;    // nothing is nested under it, so emit nothing
-      var cv=javaName(base.name,used);
-      P+='// clip region: '+base.name+'\n';
-      put(declParts(cv,base,split,frc));
-      var sv='savedClip'+(clipStack.length?String(clipStack.length+1):'');
-      P+='Shape '+sv+' = '+g2n()+'.getClip();\n';
-      // clip() intersects with what is already active so nested regions compose;
-      // setClip() would throw the outer region away
-      P+=g2n()+'.clip('+cv+');\n';
-      clipStack.push(sv);
-      return;
-    }
-
-    if(drawable.length===1){
-      var l=drawable[0], v=javaName(l.name,used);
-      P+='// '+l.name+(l.group?'  [group]':'')+'\n';
-      if(l.kind!=='text'&&l.kind!=='image') put(declParts(v,l,split,frc));
-      P+=alphaOpen(l,v);
-      P+=tfOpen(l,v);
-      if(l.kind==='text') P+=textBlock(l,v);
-      else if(l.kind==='image'){
-        var gi=norm(l.g);
-        P+=g2n()+'.drawImage('+IMGVARS[l.img.src]+', '+coord(gi.x)+', '+coord(gi.y)+', '
-          +coord(gi.w)+', '+coord(gi.h)+', null);\n';
-      } else {
-        if(l.render==='fill'||l.render==='both'){ P+=paintStmt(l); P+=g2n()+'.fill('+v+');\n'; }
-        if(l.render==='draw'||l.render==='both'){
-          P+=g2n()+'.setColor('+colorExpr(l.strokeColor)+');\n';
-          P+=strokeStmt(l);
-          P+=g2n()+'.draw('+v+');\n';
-        }
-      }
-      P+=tfClose(l,v);
-      P+=alphaClose(l,v);
-      return;
-    }
-
-    // Area group: members keep their own transforms, relative to the base
-    P+='// '+drawable.map(function(x){ return x.name; }).join(' → ')+'\n';
-    var bm=tfMatrix(base), baseInv=null;
-    if(bm){ try{ baseInv=bm.inverse(); }catch(e){ baseInv=null; } }
-    var names=drawable.map(function(x){ return javaName(x.name,used); });
-    var parts=[];
-    drawable.forEach(function(x,i){
-      local(declParts(names[i],x,false,frc));
-      if(x.kind==='text') USED_FRC=USED_FRC||split;
-      var bake=tfBake(names[i],x,baseInv);
-      if(split) B+=bake.code; else P+=bake.code;
-      parts.push(bake.name);
-    });
-    var av=javaName(drawable[0].name+' area',used);
-    var areaBuild='Area '+av+' = new Area('+parts[0]+');\n';
-    for(var i=1;i<drawable.length;i++)
-      areaBuild+=av+'.'+drawable[i].combine+'(new Area('+parts[i]+'));\n';
-    if(split){
-      F+='private Area '+av+';\n';
-      B+=areaBuild.replace('Area '+av+' = ',av+' = ')+'\n';
-    } else P+=areaBuild;
-
-    P+=alphaOpen(base,av);
-    P+=tfOpen(base,av);
-    if(base.render==='fill'||base.render==='both'){ P+=paintStmt(base); P+=g2n()+'.fill('+av+');\n'; }
-    if(base.render==='draw'||base.render==='both'){
-      P+=g2n()+'.setColor('+colorExpr(base.strokeColor)+');\n';
-      P+=strokeStmt(base);
-      P+=g2n()+'.draw('+av+');\n';
-    }
-    P+=tfClose(base,av);
-    P+=alphaClose(base,av);
-  });
-
-  if(clipStack.length) P+='\n';
-  while(clipStack.length) P+=g2n()+'.setClip('+clipStack.pop()+');\n';
-  if(split&&USED_FRC)
-    F='private static final FontRenderContext FRC = new FontRenderContext(null, true, true);\n'+F;
-  return {fields:F,build:B,paint:P};
-}
-
-function generate(){
-  var split=buildOnceOn();
-  var g=genParts(split);
-  if(!g.paint.trim()) return '';
-  var setup=bgSetup();
-  var head=setup?'// ---- panel: call this in your constructor ----\n'+setup+'\n':'';
-  if(!split) return head+g.paint;
-  var out=head;
-  if(g.fields.trim()) out+='// ---- fields: declare these in your class ----\n'+g.fields+'\n';
-  if(g.build.trim()) out+='// ---- build once: call this from your constructor ----\n'+g.build+'\n';
-  out+='// ---- paintComponent ----\n'+g.paint;
-  return out;
-}
-
-function indent(t,p){ return t.split('\n').map(function(l){ return l.trim()===''?'':p+l; }).join('\n'); }
-
-function classNameOf(){
-  var id=javaName(document.getElementById('className').value||'ShapePanel',{},true);
-  return cap(id);
-}
-
-function classImports(){
-  var s='import java.awt.*;\nimport java.awt.geom.*;\nimport javax.swing.*;\n';
-  if(USED_FRC) s+='import java.awt.font.FontRenderContext;\n';
-  if(USED_IMAGES) s+='import java.awt.image.BufferedImage;\nimport javax.imageio.ImageIO;\n'
-                    +'import java.io.File;\nimport java.io.IOException;\n';
-  return s;
-}
-function bgSetup(){
-  return S.bgSet?('setBackground('+colorExpr(S.bg)+');\n'):'';
-}
-function hintsBlock(){
-  return S.aa?'        '+g2n()+'.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n'
-             +'                            RenderingHints.VALUE_ANTIALIAS_ON);\n':'';
-}
-function mainBlock(cn){
-  return '    public static void main(String[] args) {\n'
-  +'        SwingUtilities.invokeLater(() -> {\n'
-  +'            JFrame f = new JFrame("'+cn+'");\n'
-  +'            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n'
-  +'            f.add(new '+cn+'());\n'
-  +'            f.pack();\n'
-  +'            f.setLocationRelativeTo(null);\n'
-  +'            f.setVisible(true);\n'
-  +'        });\n'
-  +'    }\n';
-}
-
-// shapes built once in the constructor; paintComponent only paints
-function fullClassOnce(){
-  var g=genParts(true);
-  if(!g.paint.trim()) return '';
-  var cn=classNameOf(), hasBuild=!!g.build.trim();
-  return classImports()+'\n'
-  +'public class '+cn+' extends JPanel {\n\n'
-  +(g.fields.trim()?indent(g.fields.replace(/\n+$/,''),'    ')+'\n\n':'')
-  +'    public '+cn+'() {\n'
-  +'        setPreferredSize(new Dimension('+S.W+', '+S.H+'));\n'
-  +(S.bgSet?'        '+bgSetup():'')
-  +(hasBuild?'        buildShapes();\n':'')
-  +'    }\n\n'
-  +(hasBuild?('    private void buildShapes() {\n'
-             +indent(g.build.replace(/\n+$/,''),'        ')+'\n'
-             +'    }\n\n'):'')
-  +'    @Override\n'
-  +'    protected void paintComponent(Graphics g) {\n'
-  +'        super.paintComponent(g);\n'
-  +'        Graphics2D '+g2n()+' = (Graphics2D) g;\n'
-  +hintsBlock()
-  +'\n'+indent(g.paint.replace(/\n+$/,''),'        ')+'\n'
-  +'    }\n\n'
-  +mainBlock(cn)
-  +'}\n';
-}
-
-function fullClass(){
-  if(buildOnceOn()) return fullClassOnce();
-  var body=generate();
-  if(!body.trim()) return '';
-  var cn=classNameOf();
-  return classImports()+'\n'
-  +'public class '+cn+' extends JPanel {\n\n'
-  +(S.bgSet?('    public '+cn+'() {\n        '+bgSetup()+'    }\n\n'):'')
-  +'    @Override\n'
-  +'    protected void paintComponent(Graphics g) {\n'
-  +'        super.paintComponent(g);\n'
-  +'        Graphics2D '+g2n()+' = (Graphics2D) g;\n'
-  +hintsBlock()
-  +'\n'+indent(body.replace(/\n+$/,''),'        ')+'\n'
-  +'    }\n\n'
-  +'    @Override\n'
-  +'    public Dimension getPreferredSize() {\n'
-  +'        return new Dimension('+S.W+', '+S.H+');\n'
-  +'    }\n\n'
-  +mainBlock(cn)
-  +'}\n';
-}
-
-function outputText(){ return S.out==='full' ? fullClass() : generate(); }
-
-function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 
 function emitCode(){
   var el=document.getElementById('code'), txt=outputText();
@@ -2381,36 +1610,7 @@ function fillBlank(){
 
 // strings and comments are lifted out first: "class" is itself a keyword, so a
 // blind replace would rewrite the <span class="str"> markup it had just made
-var KW=/\b(GeneralPath|Path2D|Polygon|Rectangle2D|RoundRectangle2D|Ellipse2D|Arc2D|Area|BasicStroke|AffineTransform|AlphaComposite|Composite|GradientPaint|RadialGradientPaint|TexturePaint|BufferedImage|ImageIO|IOException|File|Point2D|Font|Shape|Color|Dimension|Graphics2D|Graphics|JPanel|JFrame|SwingUtilities|RenderingHints|Math|new|public|protected|import|class|extends|return|void|static|try|catch|null|int|float)\b/g;
-function plainCode(s){
-  return esc(s).replace(KW,'<span class="kw">$1</span>')
-               .replace(/(-?\d+\.?\d*)(?=[,)f])/g,'<span class="num">$1</span>');
-}
-function highlight(src){
-  var out='', i=0, n=src.length;
-  while(i<n){
-    if(src.charAt(i)==='"'){
-      var j=i+1;
-      while(j<n){
-        if(src.charAt(j)==='\\'){ j+=2; continue; }
-        if(src.charAt(j)==='"'){ j++; break; }
-        j++;
-      }
-      out+='<span class="str">'+esc(src.slice(i,j))+'</span>';
-      i=j; continue;
-    }
-    if(src.charAt(i)==='/'&&src.charAt(i+1)==='/'){
-      var k=src.indexOf('\n',i); if(k<0) k=n;
-      out+='<span class="cm">'+esc(src.slice(i,k))+'</span>';
-      i=k; continue;
-    }
-    var m=i;
-    while(m<n&&src.charAt(m)!=='"'&&!(src.charAt(m)==='/'&&src.charAt(m+1)==='/')) m++;
-    out+=plainCode(src.slice(i,m));
-    i=m;
-  }
-  return out;
-}
+var esc=window.PathPlotter.codeOutput.esc, highlight=window.PathPlotter.codeOutput.highlight;
 
 /* ================= tool rail ================= */
 
@@ -3048,7 +2248,7 @@ function cloneLayers(list,offset){
   return list.map(function(src){
     var c=normalize(JSON.parse(JSON.stringify(src)));
     if(c.group){
-      if(!gmap[c.group]) gmap[c.group]='g'+(++GID);
+      if(!gmap[c.group]) gmap[c.group]=nextGroupId();
       c.group=gmap[c.group];
     }
     if(offset) shiftLayer(c,offset,offset);
@@ -3082,7 +2282,7 @@ function pasteClipboard(){ if(CLIP&&CLIP.length) pasteLayers(CLIP); else toast('
 function doGroup(){
   if(S.selLayers.length<2){ toast('Select two or more shapes to group'); return; }
   push();
-  var gid='g'+(++GID);
+  var gid=nextGroupId();
   var idxs=S.selLayers.slice().sort(function(a,b){ return a-b; });
   idxs.forEach(function(i){ S.layers[i].group=gid; });
   moveLayers(idxs,idxs[0]);
@@ -3914,7 +3114,7 @@ document.getElementById('varPrefix').addEventListener('change',function(){
 document.getElementById('g2Name').addEventListener('input',function(){
   var id=javaIdent(this.value);
   if(/^[0-9]/.test(id)) id='';
-  if(RESERVED[id]) id=id+'Var';
+  if(java.isReserved(id)) id=id+'Var';
   S.g2Name=id;
   emitCode(); scheduleSave();
 });
@@ -5636,24 +4836,21 @@ function labEmitArg(node,ctx){
 }
 function labJava(){
   if(!LAB.ast) return '';
-  var keepFrc=USED_FRC;
-  try{
-    var used={},names=[],decl='';
-    var refs=labRefs(LAB.ast,[]).slice().sort(function(a,b){ return a-b; });
-    refs.forEach(function(i){
-      var l=LAB.shapes[i];
-      var v=javaName(l.name,used);
-      var d=declParts(v,l,false,g2n()+'.getFontRenderContext()');
-      decl+=d.field+d.build;
-      var bake=tfBake(v,l,null);       // the operand's own rotate / scale / shear
-      decl+=bake.code;
-      names[i]=bake.name;
-    });
-    var ctx={code:'',names:names,n:0,used:used};
-    var root=labEmitVar(LAB.ast,ctx);
-    return '// '+labText(LAB.ast)+'\n'+decl+'\n'+ctx.code
-      +'\n'+g2n()+'.fill('+root+');\n';
-  } finally { USED_FRC=keepFrc; }      // the sheet's own output owns that flag
+  var used={},names=[],decl='';
+  var refs=labRefs(LAB.ast,[]).slice().sort(function(a,b){ return a-b; });
+  refs.forEach(function(i){
+    var l=LAB.shapes[i];
+    var v=javaName(l.name,used);
+    var d=declParts(v,l,false,g2n()+'.getFontRenderContext()');
+    decl+=d.field+d.build;
+    var bake=tfBake(v,l,null);       // the operand's own rotate / scale / shear
+    decl+=bake.code;
+    names[i]=bake.name;
+  });
+  var ctx={code:'',names:names,n:0,used:used};
+  var root=labEmitVar(LAB.ast,ctx);
+  return '// '+labText(LAB.ast)+'\n'+decl+'\n'+ctx.code
+    +'\n'+g2n()+'.fill('+root+');\n';
 }
 
 /* ---- handing the result to the sheet ---- */

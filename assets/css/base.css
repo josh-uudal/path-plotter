@@ -1,0 +1,23 @@
+
+:root{
+  --vellum:#eef1ea; --vellum-deep:#e3e8de; --ink:#17242b; --ink-soft:#455259;
+  --plot:#b02f4c; --panel:#f7f8f4; --edge:#ccd5cb; --rail:#20313a; --rail-soft:#a2b5be;
+  --grip:#dfe5dc;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overscroll-behavior:none}
+body{background:var(--vellum);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;
+  font-size:14.5px;line-height:1.45;display:flex;flex-direction:column;overflow:hidden;
+  -webkit-font-smoothing:antialiased}
+kbd{font-family:"IBM Plex Mono",monospace;font-size:11.5px;border:1px solid var(--edge);
+  border-bottom-width:2px;border-radius:3px;padding:0 4px;background:#fff;color:var(--ink-soft)}
+code{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+
+/* slim, quiet scrollbars everywhere; the tool rail has none at all */
+*{scrollbar-width:thin;scrollbar-color:#c4cec2 transparent}
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:#c4cec2;border-radius:5px;border:2px solid transparent;
+  background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:#a9b6a7;background-clip:content-box}
+

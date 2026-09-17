@@ -1,0 +1,106 @@
+{
+  "varPrefix": "art",
+  "g2Name": "canvas",
+  "precision": 3,
+  "layers": [
+    {
+      "name": "outline",
+      "kind": "path",
+      "render": "both",
+      "paint": "linear",
+      "gradAngle": 35,
+      "alpha": 0.75,
+      "strokeW": 3,
+      "pts": [
+        {
+          "cmd": "move",
+          "x": 50.125,
+          "y": 40
+        },
+        {
+          "cmd": "quad",
+          "cx": 110,
+          "cy": 0,
+          "x": 170,
+          "y": 70
+        },
+        {
+          "cmd": "cubic",
+          "c1x": 260,
+          "c1y": 30,
+          "c2x": 270,
+          "c2y": 180,
+          "x": 190,
+          "y": 200
+        },
+        {
+          "cmd": "line",
+          "x": 60,
+          "y": 180
+        }
+      ]
+    },
+    {
+      "name": "rounded box",
+      "kind": "rect",
+      "render": "fill",
+      "g": {
+        "x": 320,
+        "y": 60,
+        "w": 150,
+        "h": 100,
+        "rx": 15,
+        "ry": 20
+      },
+      "tf": {
+        "rot": 15,
+        "sx": 1,
+        "sy": 1,
+        "shx": 0,
+        "shy": 0
+      }
+    },
+    {
+      "name": "dots",
+      "kind": "ellipse",
+      "render": "draw",
+      "g": {
+        "x": 350,
+        "y": 230,
+        "w": 100,
+        "h": 70
+      },
+      "dash": "5, 3",
+      "cap": "round",
+      "join": "bevel"
+    },
+    {
+      "name": "cutout base",
+      "kind": "ellipse",
+      "render": "fill",
+      "fillColor": "#b02f4c",
+      "g": {
+        "x": 75,
+        "y": 260,
+        "w": 180,
+        "h": 150
+      }
+    },
+    {
+      "name": "cutout hole",
+      "kind": "ellipse",
+      "combine": "subtract",
+      "g": {
+        "x": 140,
+        "y": 240,
+        "w": 140,
+        "h": 120
+      }
+    }
+  ],
+  "version": 8,
+  "W": 600,
+  "H": 450,
+  "grid": 25,
+  "className": "ExamplePanel"
+}

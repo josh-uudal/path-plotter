@@ -1,0 +1,946 @@
+[
+  {
+    "name": "Curves / frag / repaint",
+    "project": {
+      "varPrefix": "art",
+      "g2Name": "canvas",
+      "precision": 3,
+      "layers": [
+        {
+          "name": "outline",
+          "kind": "path",
+          "render": "both",
+          "paint": "linear",
+          "gradAngle": 35,
+          "alpha": 0.75,
+          "strokeW": 3,
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 50.125,
+              "y": 40
+            },
+            {
+              "cmd": "quad",
+              "cx": 110,
+              "cy": 0,
+              "x": 170,
+              "y": 70
+            },
+            {
+              "cmd": "cubic",
+              "c1x": 260,
+              "c1y": 30,
+              "c2x": 270,
+              "c2y": 180,
+              "x": 190,
+              "y": 200
+            },
+            {
+              "cmd": "line",
+              "x": 60,
+              "y": 180
+            }
+          ]
+        },
+        {
+          "name": "rounded box",
+          "kind": "rect",
+          "render": "fill",
+          "g": {
+            "x": 320,
+            "y": 60,
+            "w": 150,
+            "h": 100,
+            "rx": 15,
+            "ry": 20
+          },
+          "tf": {
+            "rot": 15,
+            "sx": 1,
+            "sy": 1,
+            "shx": 0,
+            "shy": 0
+          }
+        },
+        {
+          "name": "dots",
+          "kind": "ellipse",
+          "render": "draw",
+          "g": {
+            "x": 350,
+            "y": 230,
+            "w": 100,
+            "h": 70
+          },
+          "dash": "5, 3",
+          "cap": "round",
+          "join": "bevel"
+        }
+      ],
+      "out": "frag"
+    },
+    "options": {
+      "buildOnce": false,
+      "className": "CurvesPanel"
+    },
+    "output": "// ---- panel: call this in your constructor ----\nsetBackground(new Color(255, 255, 255));\n\n// outline\nGeneralPath artOutline = new GeneralPath();\nartOutline.moveTo(50.125, 40);\nartOutline.quadTo(110, 0, 170, 70);\nartOutline.curveTo(260, 30, 270, 180, 190, 200);\nartOutline.lineTo(60, 180);\nartOutline.closePath();\nComposite compArtOutline = canvas.getComposite();\ncanvas.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.75f));\ncanvas.setPaint(new GradientPaint(39f, 15f, new Color(47, 111, 143), 281f, 185f, new Color(255, 255, 255)));\ncanvas.fill(artOutline);\ncanvas.setColor(new Color(47, 111, 143));\ncanvas.setStroke(new BasicStroke(3f));\ncanvas.draw(artOutline);\ncanvas.setComposite(compArtOutline);\n\n// rounded box\nRoundRectangle2D artRoundedBox = new RoundRectangle2D.Double(320, 60, 150, 100, 30, 40);\nAffineTransform txArtRoundedBox = canvas.getTransform();\ncanvas.translate(395, 110);\ncanvas.rotate(Math.toRadians(15));\ncanvas.translate(-395, -110);\ncanvas.setColor(new Color(47, 111, 143));\ncanvas.fill(artRoundedBox);\ncanvas.setTransform(txArtRoundedBox);\n\n// dots\nEllipse2D artDots = new Ellipse2D.Double(350, 230, 100, 70);\ncanvas.setColor(new Color(47, 111, 143));\ncanvas.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_BEVEL, 10f,\n        new float[]{5f, 3f}, 0f));\ncanvas.draw(artDots);\n"
+  },
+  {
+    "name": "Curves / full / repaint",
+    "project": {
+      "varPrefix": "art",
+      "g2Name": "canvas",
+      "precision": 3,
+      "layers": [
+        {
+          "name": "outline",
+          "kind": "path",
+          "render": "both",
+          "paint": "linear",
+          "gradAngle": 35,
+          "alpha": 0.75,
+          "strokeW": 3,
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 50.125,
+              "y": 40
+            },
+            {
+              "cmd": "quad",
+              "cx": 110,
+              "cy": 0,
+              "x": 170,
+              "y": 70
+            },
+            {
+              "cmd": "cubic",
+              "c1x": 260,
+              "c1y": 30,
+              "c2x": 270,
+              "c2y": 180,
+              "x": 190,
+              "y": 200
+            },
+            {
+              "cmd": "line",
+              "x": 60,
+              "y": 180
+            }
+          ]
+        },
+        {
+          "name": "rounded box",
+          "kind": "rect",
+          "render": "fill",
+          "g": {
+            "x": 320,
+            "y": 60,
+            "w": 150,
+            "h": 100,
+            "rx": 15,
+            "ry": 20
+          },
+          "tf": {
+            "rot": 15,
+            "sx": 1,
+            "sy": 1,
+            "shx": 0,
+            "shy": 0
+          }
+        },
+        {
+          "name": "dots",
+          "kind": "ellipse",
+          "render": "draw",
+          "g": {
+            "x": 350,
+            "y": 230,
+            "w": 100,
+            "h": 70
+          },
+          "dash": "5, 3",
+          "cap": "round",
+          "join": "bevel"
+        }
+      ],
+      "out": "full"
+    },
+    "options": {
+      "buildOnce": false,
+      "className": "CurvesPanel"
+    },
+    "output": "import java.awt.*;\nimport java.awt.geom.*;\nimport javax.swing.*;\n\npublic class CurvesPanel extends JPanel {\n\n    public CurvesPanel() {\n        setBackground(new Color(255, 255, 255));\n    }\n\n    @Override\n    protected void paintComponent(Graphics g) {\n        super.paintComponent(g);\n        Graphics2D canvas = (Graphics2D) g;\n        canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n                            RenderingHints.VALUE_ANTIALIAS_ON);\n\n        // ---- panel: call this in your constructor ----\n        setBackground(new Color(255, 255, 255));\n\n        // outline\n        GeneralPath artOutline = new GeneralPath();\n        artOutline.moveTo(50.125, 40);\n        artOutline.quadTo(110, 0, 170, 70);\n        artOutline.curveTo(260, 30, 270, 180, 190, 200);\n        artOutline.lineTo(60, 180);\n        artOutline.closePath();\n        Composite compArtOutline = canvas.getComposite();\n        canvas.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.75f));\n        canvas.setPaint(new GradientPaint(39f, 15f, new Color(47, 111, 143), 281f, 185f, new Color(255, 255, 255)));\n        canvas.fill(artOutline);\n        canvas.setColor(new Color(47, 111, 143));\n        canvas.setStroke(new BasicStroke(3f));\n        canvas.draw(artOutline);\n        canvas.setComposite(compArtOutline);\n\n        // rounded box\n        RoundRectangle2D artRoundedBox = new RoundRectangle2D.Double(320, 60, 150, 100, 30, 40);\n        AffineTransform txArtRoundedBox = canvas.getTransform();\n        canvas.translate(395, 110);\n        canvas.rotate(Math.toRadians(15));\n        canvas.translate(-395, -110);\n        canvas.setColor(new Color(47, 111, 143));\n        canvas.fill(artRoundedBox);\n        canvas.setTransform(txArtRoundedBox);\n\n        // dots\n        Ellipse2D artDots = new Ellipse2D.Double(350, 230, 100, 70);\n        canvas.setColor(new Color(47, 111, 143));\n        canvas.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_BEVEL, 10f,\n                new float[]{5f, 3f}, 0f));\n        canvas.draw(artDots);\n    }\n\n    @Override\n    public Dimension getPreferredSize() {\n        return new Dimension(600, 450);\n    }\n\n    public static void main(String[] args) {\n        SwingUtilities.invokeLater(() -> {\n            JFrame f = new JFrame(\"CurvesPanel\");\n            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n            f.add(new CurvesPanel());\n            f.pack();\n            f.setLocationRelativeTo(null);\n            f.setVisible(true);\n        });\n    }\n}\n"
+  },
+  {
+    "name": "Curves / frag / build once",
+    "project": {
+      "varPrefix": "art",
+      "g2Name": "canvas",
+      "precision": 3,
+      "layers": [
+        {
+          "name": "outline",
+          "kind": "path",
+          "render": "both",
+          "paint": "linear",
+          "gradAngle": 35,
+          "alpha": 0.75,
+          "strokeW": 3,
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 50.125,
+              "y": 40
+            },
+            {
+              "cmd": "quad",
+              "cx": 110,
+              "cy": 0,
+              "x": 170,
+              "y": 70
+            },
+            {
+              "cmd": "cubic",
+              "c1x": 260,
+              "c1y": 30,
+              "c2x": 270,
+              "c2y": 180,
+              "x": 190,
+              "y": 200
+            },
+            {
+              "cmd": "line",
+              "x": 60,
+              "y": 180
+            }
+          ]
+        },
+        {
+          "name": "rounded box",
+          "kind": "rect",
+          "render": "fill",
+          "g": {
+            "x": 320,
+            "y": 60,
+            "w": 150,
+            "h": 100,
+            "rx": 15,
+            "ry": 20
+          },
+          "tf": {
+            "rot": 15,
+            "sx": 1,
+            "sy": 1,
+            "shx": 0,
+            "shy": 0
+          }
+        },
+        {
+          "name": "dots",
+          "kind": "ellipse",
+          "render": "draw",
+          "g": {
+            "x": 350,
+            "y": 230,
+            "w": 100,
+            "h": 70
+          },
+          "dash": "5, 3",
+          "cap": "round",
+          "join": "bevel"
+        }
+      ],
+      "out": "frag"
+    },
+    "options": {
+      "buildOnce": true,
+      "className": "CurvesPanel"
+    },
+    "output": "// ---- panel: call this in your constructor ----\nsetBackground(new Color(255, 255, 255));\n\n// ---- fields: declare these in your class ----\nprivate final GeneralPath artOutline = new GeneralPath();\nprivate final RoundRectangle2D artRoundedBox = new RoundRectangle2D.Double(320, 60, 150, 100, 30, 40);\nprivate final Ellipse2D artDots = new Ellipse2D.Double(350, 230, 100, 70);\n\n// ---- build once: call this from your constructor ----\nartOutline.moveTo(50.125, 40);\nartOutline.quadTo(110, 0, 170, 70);\nartOutline.curveTo(260, 30, 270, 180, 190, 200);\nartOutline.lineTo(60, 180);\nartOutline.closePath();\n\n// ---- paintComponent ----\n// outline\nComposite compArtOutline = canvas.getComposite();\ncanvas.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.75f));\ncanvas.setPaint(new GradientPaint(39f, 15f, new Color(47, 111, 143), 281f, 185f, new Color(255, 255, 255)));\ncanvas.fill(artOutline);\ncanvas.setColor(new Color(47, 111, 143));\ncanvas.setStroke(new BasicStroke(3f));\ncanvas.draw(artOutline);\ncanvas.setComposite(compArtOutline);\n\n// rounded box\nAffineTransform txArtRoundedBox = canvas.getTransform();\ncanvas.translate(395, 110);\ncanvas.rotate(Math.toRadians(15));\ncanvas.translate(-395, -110);\ncanvas.setColor(new Color(47, 111, 143));\ncanvas.fill(artRoundedBox);\ncanvas.setTransform(txArtRoundedBox);\n\n// dots\ncanvas.setColor(new Color(47, 111, 143));\ncanvas.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_BEVEL, 10f,\n        new float[]{5f, 3f}, 0f));\ncanvas.draw(artDots);\n"
+  },
+  {
+    "name": "Curves / full / build once",
+    "project": {
+      "varPrefix": "art",
+      "g2Name": "canvas",
+      "precision": 3,
+      "layers": [
+        {
+          "name": "outline",
+          "kind": "path",
+          "render": "both",
+          "paint": "linear",
+          "gradAngle": 35,
+          "alpha": 0.75,
+          "strokeW": 3,
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 50.125,
+              "y": 40
+            },
+            {
+              "cmd": "quad",
+              "cx": 110,
+              "cy": 0,
+              "x": 170,
+              "y": 70
+            },
+            {
+              "cmd": "cubic",
+              "c1x": 260,
+              "c1y": 30,
+              "c2x": 270,
+              "c2y": 180,
+              "x": 190,
+              "y": 200
+            },
+            {
+              "cmd": "line",
+              "x": 60,
+              "y": 180
+            }
+          ]
+        },
+        {
+          "name": "rounded box",
+          "kind": "rect",
+          "render": "fill",
+          "g": {
+            "x": 320,
+            "y": 60,
+            "w": 150,
+            "h": 100,
+            "rx": 15,
+            "ry": 20
+          },
+          "tf": {
+            "rot": 15,
+            "sx": 1,
+            "sy": 1,
+            "shx": 0,
+            "shy": 0
+          }
+        },
+        {
+          "name": "dots",
+          "kind": "ellipse",
+          "render": "draw",
+          "g": {
+            "x": 350,
+            "y": 230,
+            "w": 100,
+            "h": 70
+          },
+          "dash": "5, 3",
+          "cap": "round",
+          "join": "bevel"
+        }
+      ],
+      "out": "full"
+    },
+    "options": {
+      "buildOnce": true,
+      "className": "CurvesPanel"
+    },
+    "output": "import java.awt.*;\nimport java.awt.geom.*;\nimport javax.swing.*;\n\npublic class CurvesPanel extends JPanel {\n\n    private final GeneralPath artOutline = new GeneralPath();\n    private final RoundRectangle2D artRoundedBox = new RoundRectangle2D.Double(320, 60, 150, 100, 30, 40);\n    private final Ellipse2D artDots = new Ellipse2D.Double(350, 230, 100, 70);\n\n    public CurvesPanel() {\n        setPreferredSize(new Dimension(600, 450));\n        setBackground(new Color(255, 255, 255));\n        buildShapes();\n    }\n\n    private void buildShapes() {\n        artOutline.moveTo(50.125, 40);\n        artOutline.quadTo(110, 0, 170, 70);\n        artOutline.curveTo(260, 30, 270, 180, 190, 200);\n        artOutline.lineTo(60, 180);\n        artOutline.closePath();\n    }\n\n    @Override\n    protected void paintComponent(Graphics g) {\n        super.paintComponent(g);\n        Graphics2D canvas = (Graphics2D) g;\n        canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n                            RenderingHints.VALUE_ANTIALIAS_ON);\n\n        // outline\n        Composite compArtOutline = canvas.getComposite();\n        canvas.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.75f));\n        canvas.setPaint(new GradientPaint(39f, 15f, new Color(47, 111, 143), 281f, 185f, new Color(255, 255, 255)));\n        canvas.fill(artOutline);\n        canvas.setColor(new Color(47, 111, 143));\n        canvas.setStroke(new BasicStroke(3f));\n        canvas.draw(artOutline);\n        canvas.setComposite(compArtOutline);\n\n        // rounded box\n        AffineTransform txArtRoundedBox = canvas.getTransform();\n        canvas.translate(395, 110);\n        canvas.rotate(Math.toRadians(15));\n        canvas.translate(-395, -110);\n        canvas.setColor(new Color(47, 111, 143));\n        canvas.fill(artRoundedBox);\n        canvas.setTransform(txArtRoundedBox);\n\n        // dots\n        canvas.setColor(new Color(47, 111, 143));\n        canvas.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_BEVEL, 10f,\n                new float[]{5f, 3f}, 0f));\n        canvas.draw(artDots);\n    }\n\n    public static void main(String[] args) {\n        SwingUtilities.invokeLater(() -> {\n            JFrame f = new JFrame(\"CurvesPanel\");\n            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n            f.add(new CurvesPanel());\n            f.pack();\n            f.setLocationRelativeTo(null);\n            f.setVisible(true);\n        });\n    }\n}\n"
+  },
+  {
+    "name": "ClipsAndAreas / frag / repaint",
+    "project": {
+      "layers": [
+        {
+          "name": "outer mask",
+          "kind": "rect",
+          "isClip": true,
+          "g": {
+            "x": 20,
+            "y": 20,
+            "w": 500,
+            "h": 350
+          }
+        },
+        {
+          "name": "inner mask",
+          "kind": "ellipse",
+          "isClip": true,
+          "clipped": true,
+          "g": {
+            "x": 40,
+            "y": 40,
+            "w": 400,
+            "h": 280
+          }
+        },
+        {
+          "name": "base",
+          "kind": "rect",
+          "clipped": true,
+          "render": "fill",
+          "g": {
+            "x": 60,
+            "y": 60,
+            "w": 300,
+            "h": 220
+          }
+        },
+        {
+          "name": "hole",
+          "kind": "ellipse",
+          "clipped": true,
+          "combine": "subtract",
+          "g": {
+            "x": 120,
+            "y": 90,
+            "w": 140,
+            "h": 120
+          }
+        },
+        {
+          "name": "outside",
+          "kind": "path",
+          "shapeClass": "Polygon",
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 480,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 540,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 510,
+              "y": 360
+            }
+          ]
+        }
+      ],
+      "out": "frag"
+    },
+    "options": {
+      "buildOnce": false,
+      "className": "ClipsAndAreasPanel"
+    },
+    "output": "// ---- panel: call this in your constructor ----\nsetBackground(new Color(255, 255, 255));\n\n// clip region: outer mask\nRectangle2D outerMask = new Rectangle2D.Double(20, 20, 500, 350);\nShape savedClip = g2.getClip();\ng2.clip(outerMask);\n\n// clip region: inner mask\nEllipse2D innerMask = new Ellipse2D.Double(40, 40, 400, 280);\nShape savedClip2 = g2.getClip();\ng2.clip(innerMask);\n\n// base → hole\nRectangle2D base = new Rectangle2D.Double(60, 60, 300, 220);\nEllipse2D hole = new Ellipse2D.Double(120, 90, 140, 120);\nArea baseArea = new Area(base);\nbaseArea.subtract(new Area(hole));\ng2.setColor(new Color(79, 122, 58));\ng2.fill(baseArea);\n\ng2.setClip(savedClip2);\ng2.setClip(savedClip);\n\n// outside\nint[] outsideX = {480, 540, 510};\nint[] outsideY = {300, 300, 360};\nPolygon outside = new Polygon(outsideX, outsideY, 3);\ng2.setColor(new Color(79, 122, 58));\ng2.setStroke(new BasicStroke(2f));\ng2.draw(outside);\n"
+  },
+  {
+    "name": "ClipsAndAreas / full / repaint",
+    "project": {
+      "layers": [
+        {
+          "name": "outer mask",
+          "kind": "rect",
+          "isClip": true,
+          "g": {
+            "x": 20,
+            "y": 20,
+            "w": 500,
+            "h": 350
+          }
+        },
+        {
+          "name": "inner mask",
+          "kind": "ellipse",
+          "isClip": true,
+          "clipped": true,
+          "g": {
+            "x": 40,
+            "y": 40,
+            "w": 400,
+            "h": 280
+          }
+        },
+        {
+          "name": "base",
+          "kind": "rect",
+          "clipped": true,
+          "render": "fill",
+          "g": {
+            "x": 60,
+            "y": 60,
+            "w": 300,
+            "h": 220
+          }
+        },
+        {
+          "name": "hole",
+          "kind": "ellipse",
+          "clipped": true,
+          "combine": "subtract",
+          "g": {
+            "x": 120,
+            "y": 90,
+            "w": 140,
+            "h": 120
+          }
+        },
+        {
+          "name": "outside",
+          "kind": "path",
+          "shapeClass": "Polygon",
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 480,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 540,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 510,
+              "y": 360
+            }
+          ]
+        }
+      ],
+      "out": "full"
+    },
+    "options": {
+      "buildOnce": false,
+      "className": "ClipsAndAreasPanel"
+    },
+    "output": "import java.awt.*;\nimport java.awt.geom.*;\nimport javax.swing.*;\n\npublic class ClipsAndAreasPanel extends JPanel {\n\n    public ClipsAndAreasPanel() {\n        setBackground(new Color(255, 255, 255));\n    }\n\n    @Override\n    protected void paintComponent(Graphics g) {\n        super.paintComponent(g);\n        Graphics2D g2 = (Graphics2D) g;\n        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n                            RenderingHints.VALUE_ANTIALIAS_ON);\n\n        // ---- panel: call this in your constructor ----\n        setBackground(new Color(255, 255, 255));\n\n        // clip region: outer mask\n        Rectangle2D outerMask = new Rectangle2D.Double(20, 20, 500, 350);\n        Shape savedClip = g2.getClip();\n        g2.clip(outerMask);\n\n        // clip region: inner mask\n        Ellipse2D innerMask = new Ellipse2D.Double(40, 40, 400, 280);\n        Shape savedClip2 = g2.getClip();\n        g2.clip(innerMask);\n\n        // base → hole\n        Rectangle2D base = new Rectangle2D.Double(60, 60, 300, 220);\n        Ellipse2D hole = new Ellipse2D.Double(120, 90, 140, 120);\n        Area baseArea = new Area(base);\n        baseArea.subtract(new Area(hole));\n        g2.setColor(new Color(79, 122, 58));\n        g2.fill(baseArea);\n\n        g2.setClip(savedClip2);\n        g2.setClip(savedClip);\n\n        // outside\n        int[] outsideX = {480, 540, 510};\n        int[] outsideY = {300, 300, 360};\n        Polygon outside = new Polygon(outsideX, outsideY, 3);\n        g2.setColor(new Color(79, 122, 58));\n        g2.setStroke(new BasicStroke(2f));\n        g2.draw(outside);\n    }\n\n    @Override\n    public Dimension getPreferredSize() {\n        return new Dimension(600, 450);\n    }\n\n    public static void main(String[] args) {\n        SwingUtilities.invokeLater(() -> {\n            JFrame f = new JFrame(\"ClipsAndAreasPanel\");\n            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n            f.add(new ClipsAndAreasPanel());\n            f.pack();\n            f.setLocationRelativeTo(null);\n            f.setVisible(true);\n        });\n    }\n}\n"
+  },
+  {
+    "name": "ClipsAndAreas / frag / build once",
+    "project": {
+      "layers": [
+        {
+          "name": "outer mask",
+          "kind": "rect",
+          "isClip": true,
+          "g": {
+            "x": 20,
+            "y": 20,
+            "w": 500,
+            "h": 350
+          }
+        },
+        {
+          "name": "inner mask",
+          "kind": "ellipse",
+          "isClip": true,
+          "clipped": true,
+          "g": {
+            "x": 40,
+            "y": 40,
+            "w": 400,
+            "h": 280
+          }
+        },
+        {
+          "name": "base",
+          "kind": "rect",
+          "clipped": true,
+          "render": "fill",
+          "g": {
+            "x": 60,
+            "y": 60,
+            "w": 300,
+            "h": 220
+          }
+        },
+        {
+          "name": "hole",
+          "kind": "ellipse",
+          "clipped": true,
+          "combine": "subtract",
+          "g": {
+            "x": 120,
+            "y": 90,
+            "w": 140,
+            "h": 120
+          }
+        },
+        {
+          "name": "outside",
+          "kind": "path",
+          "shapeClass": "Polygon",
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 480,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 540,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 510,
+              "y": 360
+            }
+          ]
+        }
+      ],
+      "out": "frag"
+    },
+    "options": {
+      "buildOnce": true,
+      "className": "ClipsAndAreasPanel"
+    },
+    "output": "// ---- panel: call this in your constructor ----\nsetBackground(new Color(255, 255, 255));\n\n// ---- fields: declare these in your class ----\nprivate final Rectangle2D outerMask = new Rectangle2D.Double(20, 20, 500, 350);\nprivate final Ellipse2D innerMask = new Ellipse2D.Double(40, 40, 400, 280);\nprivate Area baseArea;\nprivate Polygon outside;\n\n// ---- build once: call this from your constructor ----\nRectangle2D base = new Rectangle2D.Double(60, 60, 300, 220);\nEllipse2D hole = new Ellipse2D.Double(120, 90, 140, 120);\nbaseArea = new Area(base);\nbaseArea.subtract(new Area(hole));\n\nint[] outsideX = {480, 540, 510};\nint[] outsideY = {300, 300, 360};\noutside = new Polygon(outsideX, outsideY, 3);\n\n// ---- paintComponent ----\n// clip region: outer mask\nShape savedClip = g2.getClip();\ng2.clip(outerMask);\n\n// clip region: inner mask\nShape savedClip2 = g2.getClip();\ng2.clip(innerMask);\n\n// base → hole\ng2.setColor(new Color(79, 122, 58));\ng2.fill(baseArea);\n\ng2.setClip(savedClip2);\ng2.setClip(savedClip);\n\n// outside\ng2.setColor(new Color(79, 122, 58));\ng2.setStroke(new BasicStroke(2f));\ng2.draw(outside);\n"
+  },
+  {
+    "name": "ClipsAndAreas / full / build once",
+    "project": {
+      "layers": [
+        {
+          "name": "outer mask",
+          "kind": "rect",
+          "isClip": true,
+          "g": {
+            "x": 20,
+            "y": 20,
+            "w": 500,
+            "h": 350
+          }
+        },
+        {
+          "name": "inner mask",
+          "kind": "ellipse",
+          "isClip": true,
+          "clipped": true,
+          "g": {
+            "x": 40,
+            "y": 40,
+            "w": 400,
+            "h": 280
+          }
+        },
+        {
+          "name": "base",
+          "kind": "rect",
+          "clipped": true,
+          "render": "fill",
+          "g": {
+            "x": 60,
+            "y": 60,
+            "w": 300,
+            "h": 220
+          }
+        },
+        {
+          "name": "hole",
+          "kind": "ellipse",
+          "clipped": true,
+          "combine": "subtract",
+          "g": {
+            "x": 120,
+            "y": 90,
+            "w": 140,
+            "h": 120
+          }
+        },
+        {
+          "name": "outside",
+          "kind": "path",
+          "shapeClass": "Polygon",
+          "pts": [
+            {
+              "cmd": "move",
+              "x": 480,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 540,
+              "y": 300
+            },
+            {
+              "cmd": "line",
+              "x": 510,
+              "y": 360
+            }
+          ]
+        }
+      ],
+      "out": "full"
+    },
+    "options": {
+      "buildOnce": true,
+      "className": "ClipsAndAreasPanel"
+    },
+    "output": "import java.awt.*;\nimport java.awt.geom.*;\nimport javax.swing.*;\n\npublic class ClipsAndAreasPanel extends JPanel {\n\n    private final Rectangle2D outerMask = new Rectangle2D.Double(20, 20, 500, 350);\n    private final Ellipse2D innerMask = new Ellipse2D.Double(40, 40, 400, 280);\n    private Area baseArea;\n    private Polygon outside;\n\n    public ClipsAndAreasPanel() {\n        setPreferredSize(new Dimension(600, 450));\n        setBackground(new Color(255, 255, 255));\n        buildShapes();\n    }\n\n    private void buildShapes() {\n        Rectangle2D base = new Rectangle2D.Double(60, 60, 300, 220);\n        Ellipse2D hole = new Ellipse2D.Double(120, 90, 140, 120);\n        baseArea = new Area(base);\n        baseArea.subtract(new Area(hole));\n\n        int[] outsideX = {480, 540, 510};\n        int[] outsideY = {300, 300, 360};\n        outside = new Polygon(outsideX, outsideY, 3);\n    }\n\n    @Override\n    protected void paintComponent(Graphics g) {\n        super.paintComponent(g);\n        Graphics2D g2 = (Graphics2D) g;\n        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n                            RenderingHints.VALUE_ANTIALIAS_ON);\n\n        // clip region: outer mask\n        Shape savedClip = g2.getClip();\n        g2.clip(outerMask);\n\n        // clip region: inner mask\n        Shape savedClip2 = g2.getClip();\n        g2.clip(innerMask);\n\n        // base → hole\n        g2.setColor(new Color(79, 122, 58));\n        g2.fill(baseArea);\n\n        g2.setClip(savedClip2);\n        g2.setClip(savedClip);\n\n        // outside\n        g2.setColor(new Color(79, 122, 58));\n        g2.setStroke(new BasicStroke(2f));\n        g2.draw(outside);\n    }\n\n    public static void main(String[] args) {\n        SwingUtilities.invokeLater(() -> {\n            JFrame f = new JFrame(\"ClipsAndAreasPanel\");\n            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n            f.add(new ClipsAndAreasPanel());\n            f.pack();\n            f.setLocationRelativeTo(null);\n            f.setVisible(true);\n        });\n    }\n}\n"
+  },
+  {
+    "name": "TextAndAssets / frag / repaint",
+    "project": {
+      "layers": [
+        {
+          "name": "title",
+          "kind": "text",
+          "render": "both",
+          "text": {
+            "s": "Hello\nJava2D",
+            "x": 40,
+            "y": 70,
+            "family": "SansSerif",
+            "size": 24,
+            "bold": true,
+            "italic": false
+          }
+        },
+        {
+          "name": "photo",
+          "kind": "image",
+          "g": {
+            "x": 100,
+            "y": 120,
+            "w": 180,
+            "h": 100
+          },
+          "img": {
+            "src": "fixture:photo",
+            "name": "photo.png"
+          }
+        },
+        {
+          "name": "texture",
+          "kind": "rect",
+          "render": "fill",
+          "paint": "texture",
+          "tex": {
+            "src": "fixture:tile",
+            "name": "tile.png",
+            "x": 0,
+            "y": 0,
+            "w": 64,
+            "h": 64
+          }
+        },
+        {
+          "name": "radial",
+          "kind": "ellipse",
+          "render": "fill",
+          "paint": "radial",
+          "g": {
+            "x": 320,
+            "y": 220,
+            "w": 120,
+            "h": 120
+          }
+        }
+      ],
+      "out": "frag"
+    },
+    "options": {
+      "buildOnce": false,
+      "className": "TextAndAssetsPanel"
+    },
+    "output": "// ---- panel: call this in your constructor ----\nsetBackground(new Color(255, 255, 255));\n\n// images: keep these files beside the class\nBufferedImage imgPhoto = null;\nBufferedImage imgTile = null;\ntry {\n    imgPhoto = ImageIO.read(new File(\"photo.png\"));\n    imgTile = ImageIO.read(new File(\"tile.png\"));\n} catch (IOException ex) {\n    ex.printStackTrace();\n}\n\n// title\nFont fontTitle = new Font(\"SansSerif\", Font.BOLD, 24);\ng2.setFont(fontTitle);\ng2.setColor(new Color(176, 47, 76));\ng2.drawString(\"Hello\", 40, 70);\nShape outlineTitle = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Hello\")\n        .getOutline(40f, 70f);\ng2.setColor(new Color(176, 47, 76));\ng2.setStroke(new BasicStroke(2f));\ng2.draw(outlineTitle);\ng2.setColor(new Color(176, 47, 76));\ng2.drawString(\"Java2D\", 40, 99);\nShape outlineTitle2 = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Java2D\")\n        .getOutline(40f, 99f);\ng2.setColor(new Color(176, 47, 76));\ng2.setStroke(new BasicStroke(2f));\ng2.draw(outlineTitle2);\n\n// photo\ng2.drawImage(imgPhoto, 100, 120, 180, 100, null);\n\n// texture\nRectangle2D texture = new Rectangle2D.Double(60, 60, 160, 120);\ng2.setPaint(new TexturePaint(imgTile, new Rectangle2D.Double(0, 0, 64, 64)));\ng2.fill(texture);\n\n// radial\nEllipse2D radial = new Ellipse2D.Double(320, 220, 120, 120);\ng2.setPaint(new RadialGradientPaint(new Point2D.Float(380f, 280f), 60f,\n        new float[]{0f, 1f},\n        new Color[]{new Color(176, 47, 76), new Color(255, 255, 255)}));\ng2.fill(radial);\n"
+  },
+  {
+    "name": "TextAndAssets / full / repaint",
+    "project": {
+      "layers": [
+        {
+          "name": "title",
+          "kind": "text",
+          "render": "both",
+          "text": {
+            "s": "Hello\nJava2D",
+            "x": 40,
+            "y": 70,
+            "family": "SansSerif",
+            "size": 24,
+            "bold": true,
+            "italic": false
+          }
+        },
+        {
+          "name": "photo",
+          "kind": "image",
+          "g": {
+            "x": 100,
+            "y": 120,
+            "w": 180,
+            "h": 100
+          },
+          "img": {
+            "src": "fixture:photo",
+            "name": "photo.png"
+          }
+        },
+        {
+          "name": "texture",
+          "kind": "rect",
+          "render": "fill",
+          "paint": "texture",
+          "tex": {
+            "src": "fixture:tile",
+            "name": "tile.png",
+            "x": 0,
+            "y": 0,
+            "w": 64,
+            "h": 64
+          }
+        },
+        {
+          "name": "radial",
+          "kind": "ellipse",
+          "render": "fill",
+          "paint": "radial",
+          "g": {
+            "x": 320,
+            "y": 220,
+            "w": 120,
+            "h": 120
+          }
+        }
+      ],
+      "out": "full"
+    },
+    "options": {
+      "buildOnce": false,
+      "className": "TextAndAssetsPanel"
+    },
+    "output": "import java.awt.*;\nimport java.awt.geom.*;\nimport javax.swing.*;\nimport java.awt.image.BufferedImage;\nimport javax.imageio.ImageIO;\nimport java.io.File;\nimport java.io.IOException;\n\npublic class TextAndAssetsPanel extends JPanel {\n\n    public TextAndAssetsPanel() {\n        setBackground(new Color(255, 255, 255));\n    }\n\n    @Override\n    protected void paintComponent(Graphics g) {\n        super.paintComponent(g);\n        Graphics2D g2 = (Graphics2D) g;\n        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n                            RenderingHints.VALUE_ANTIALIAS_ON);\n\n        // ---- panel: call this in your constructor ----\n        setBackground(new Color(255, 255, 255));\n\n        // images: keep these files beside the class\n        BufferedImage imgPhoto = null;\n        BufferedImage imgTile = null;\n        try {\n            imgPhoto = ImageIO.read(new File(\"photo.png\"));\n            imgTile = ImageIO.read(new File(\"tile.png\"));\n        } catch (IOException ex) {\n            ex.printStackTrace();\n        }\n\n        // title\n        Font fontTitle = new Font(\"SansSerif\", Font.BOLD, 24);\n        g2.setFont(fontTitle);\n        g2.setColor(new Color(176, 47, 76));\n        g2.drawString(\"Hello\", 40, 70);\n        Shape outlineTitle = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Hello\")\n                .getOutline(40f, 70f);\n        g2.setColor(new Color(176, 47, 76));\n        g2.setStroke(new BasicStroke(2f));\n        g2.draw(outlineTitle);\n        g2.setColor(new Color(176, 47, 76));\n        g2.drawString(\"Java2D\", 40, 99);\n        Shape outlineTitle2 = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Java2D\")\n                .getOutline(40f, 99f);\n        g2.setColor(new Color(176, 47, 76));\n        g2.setStroke(new BasicStroke(2f));\n        g2.draw(outlineTitle2);\n\n        // photo\n        g2.drawImage(imgPhoto, 100, 120, 180, 100, null);\n\n        // texture\n        Rectangle2D texture = new Rectangle2D.Double(60, 60, 160, 120);\n        g2.setPaint(new TexturePaint(imgTile, new Rectangle2D.Double(0, 0, 64, 64)));\n        g2.fill(texture);\n\n        // radial\n        Ellipse2D radial = new Ellipse2D.Double(320, 220, 120, 120);\n        g2.setPaint(new RadialGradientPaint(new Point2D.Float(380f, 280f), 60f,\n                new float[]{0f, 1f},\n                new Color[]{new Color(176, 47, 76), new Color(255, 255, 255)}));\n        g2.fill(radial);\n    }\n\n    @Override\n    public Dimension getPreferredSize() {\n        return new Dimension(600, 450);\n    }\n\n    public static void main(String[] args) {\n        SwingUtilities.invokeLater(() -> {\n            JFrame f = new JFrame(\"TextAndAssetsPanel\");\n            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n            f.add(new TextAndAssetsPanel());\n            f.pack();\n            f.setLocationRelativeTo(null);\n            f.setVisible(true);\n        });\n    }\n}\n"
+  },
+  {
+    "name": "TextAndAssets / frag / build once",
+    "project": {
+      "layers": [
+        {
+          "name": "title",
+          "kind": "text",
+          "render": "both",
+          "text": {
+            "s": "Hello\nJava2D",
+            "x": 40,
+            "y": 70,
+            "family": "SansSerif",
+            "size": 24,
+            "bold": true,
+            "italic": false
+          }
+        },
+        {
+          "name": "photo",
+          "kind": "image",
+          "g": {
+            "x": 100,
+            "y": 120,
+            "w": 180,
+            "h": 100
+          },
+          "img": {
+            "src": "fixture:photo",
+            "name": "photo.png"
+          }
+        },
+        {
+          "name": "texture",
+          "kind": "rect",
+          "render": "fill",
+          "paint": "texture",
+          "tex": {
+            "src": "fixture:tile",
+            "name": "tile.png",
+            "x": 0,
+            "y": 0,
+            "w": 64,
+            "h": 64
+          }
+        },
+        {
+          "name": "radial",
+          "kind": "ellipse",
+          "render": "fill",
+          "paint": "radial",
+          "g": {
+            "x": 320,
+            "y": 220,
+            "w": 120,
+            "h": 120
+          }
+        }
+      ],
+      "out": "frag"
+    },
+    "options": {
+      "buildOnce": true,
+      "className": "TextAndAssetsPanel"
+    },
+    "output": "// ---- panel: call this in your constructor ----\nsetBackground(new Color(255, 255, 255));\n\n// ---- fields: declare these in your class ----\nprivate BufferedImage imgPhoto;\nprivate BufferedImage imgTile;\nprivate final Rectangle2D texture = new Rectangle2D.Double(60, 60, 160, 120);\nprivate final Ellipse2D radial = new Ellipse2D.Double(320, 220, 120, 120);\n\n// ---- build once: call this from your constructor ----\n// keep these files beside the class\ntry {\n    imgPhoto = ImageIO.read(new File(\"photo.png\"));\n    imgTile = ImageIO.read(new File(\"tile.png\"));\n} catch (IOException ex) {\n    ex.printStackTrace();\n}\n\n// ---- paintComponent ----\n// title\nFont fontTitle = new Font(\"SansSerif\", Font.BOLD, 24);\ng2.setFont(fontTitle);\ng2.setColor(new Color(176, 47, 76));\ng2.drawString(\"Hello\", 40, 70);\nShape outlineTitle = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Hello\")\n        .getOutline(40f, 70f);\ng2.setColor(new Color(176, 47, 76));\ng2.setStroke(new BasicStroke(2f));\ng2.draw(outlineTitle);\ng2.setColor(new Color(176, 47, 76));\ng2.drawString(\"Java2D\", 40, 99);\nShape outlineTitle2 = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Java2D\")\n        .getOutline(40f, 99f);\ng2.setColor(new Color(176, 47, 76));\ng2.setStroke(new BasicStroke(2f));\ng2.draw(outlineTitle2);\n\n// photo\ng2.drawImage(imgPhoto, 100, 120, 180, 100, null);\n\n// texture\ng2.setPaint(new TexturePaint(imgTile, new Rectangle2D.Double(0, 0, 64, 64)));\ng2.fill(texture);\n\n// radial\ng2.setPaint(new RadialGradientPaint(new Point2D.Float(380f, 280f), 60f,\n        new float[]{0f, 1f},\n        new Color[]{new Color(176, 47, 76), new Color(255, 255, 255)}));\ng2.fill(radial);\n"
+  },
+  {
+    "name": "TextAndAssets / full / build once",
+    "project": {
+      "layers": [
+        {
+          "name": "title",
+          "kind": "text",
+          "render": "both",
+          "text": {
+            "s": "Hello\nJava2D",
+            "x": 40,
+            "y": 70,
+            "family": "SansSerif",
+            "size": 24,
+            "bold": true,
+            "italic": false
+          }
+        },
+        {
+          "name": "photo",
+          "kind": "image",
+          "g": {
+            "x": 100,
+            "y": 120,
+            "w": 180,
+            "h": 100
+          },
+          "img": {
+            "src": "fixture:photo",
+            "name": "photo.png"
+          }
+        },
+        {
+          "name": "texture",
+          "kind": "rect",
+          "render": "fill",
+          "paint": "texture",
+          "tex": {
+            "src": "fixture:tile",
+            "name": "tile.png",
+            "x": 0,
+            "y": 0,
+            "w": 64,
+            "h": 64
+          }
+        },
+        {
+          "name": "radial",
+          "kind": "ellipse",
+          "render": "fill",
+          "paint": "radial",
+          "g": {
+            "x": 320,
+            "y": 220,
+            "w": 120,
+            "h": 120
+          }
+        }
+      ],
+      "out": "full"
+    },
+    "options": {
+      "buildOnce": true,
+      "className": "TextAndAssetsPanel"
+    },
+    "output": "import java.awt.*;\nimport java.awt.geom.*;\nimport javax.swing.*;\nimport java.awt.image.BufferedImage;\nimport javax.imageio.ImageIO;\nimport java.io.File;\nimport java.io.IOException;\n\npublic class TextAndAssetsPanel extends JPanel {\n\n    private BufferedImage imgPhoto;\n    private BufferedImage imgTile;\n    private final Rectangle2D texture = new Rectangle2D.Double(60, 60, 160, 120);\n    private final Ellipse2D radial = new Ellipse2D.Double(320, 220, 120, 120);\n\n    public TextAndAssetsPanel() {\n        setPreferredSize(new Dimension(600, 450));\n        setBackground(new Color(255, 255, 255));\n        buildShapes();\n    }\n\n    private void buildShapes() {\n        // keep these files beside the class\n        try {\n            imgPhoto = ImageIO.read(new File(\"photo.png\"));\n            imgTile = ImageIO.read(new File(\"tile.png\"));\n        } catch (IOException ex) {\n            ex.printStackTrace();\n        }\n    }\n\n    @Override\n    protected void paintComponent(Graphics g) {\n        super.paintComponent(g);\n        Graphics2D g2 = (Graphics2D) g;\n        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,\n                            RenderingHints.VALUE_ANTIALIAS_ON);\n\n        // title\n        Font fontTitle = new Font(\"SansSerif\", Font.BOLD, 24);\n        g2.setFont(fontTitle);\n        g2.setColor(new Color(176, 47, 76));\n        g2.drawString(\"Hello\", 40, 70);\n        Shape outlineTitle = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Hello\")\n                .getOutline(40f, 70f);\n        g2.setColor(new Color(176, 47, 76));\n        g2.setStroke(new BasicStroke(2f));\n        g2.draw(outlineTitle);\n        g2.setColor(new Color(176, 47, 76));\n        g2.drawString(\"Java2D\", 40, 99);\n        Shape outlineTitle2 = fontTitle.createGlyphVector(g2.getFontRenderContext(), \"Java2D\")\n                .getOutline(40f, 99f);\n        g2.setColor(new Color(176, 47, 76));\n        g2.setStroke(new BasicStroke(2f));\n        g2.draw(outlineTitle2);\n\n        // photo\n        g2.drawImage(imgPhoto, 100, 120, 180, 100, null);\n\n        // texture\n        g2.setPaint(new TexturePaint(imgTile, new Rectangle2D.Double(0, 0, 64, 64)));\n        g2.fill(texture);\n\n        // radial\n        g2.setPaint(new RadialGradientPaint(new Point2D.Float(380f, 280f), 60f,\n                new float[]{0f, 1f},\n                new Color[]{new Color(176, 47, 76), new Color(255, 255, 255)}));\n        g2.fill(radial);\n    }\n\n    public static void main(String[] args) {\n        SwingUtilities.invokeLater(() -> {\n            JFrame f = new JFrame(\"TextAndAssetsPanel\");\n            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n            f.add(new TextAndAssetsPanel());\n            f.pack();\n            f.setLocationRelativeTo(null);\n            f.setVisible(true);\n        });\n    }\n}\n"
+  }
+]
