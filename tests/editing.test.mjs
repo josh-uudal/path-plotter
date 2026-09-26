@@ -52,6 +52,30 @@ test('point nudge moves linked handles and restores the point selection on undo'
   h.undo();assert.equal(e.state.layers[0].pts[1].c1x,40);assert.equal(e.state.sel.i,0);
 });
 
+test('point edits on a rotated layer keep the untouched geometry on the sheet', () => {
+  const near=(p,q)=>assert(Math.hypot(p.x-q.x,p.y-q.y)<1e-9,`${JSON.stringify(p)} vs ${JSON.stringify(q)}`);
+  // rect corner: the pointer picks a sheet point, the se corner has to land on it
+  // and the nw corner has to stay put, both measured through the live transform
+  const e=createEditor({layers:[{kind:'rect',g:{x:100,y:100,w:200,h:150},tf:{rot:30}}]},{matrix:true});
+  const G=e.geometry,l=e.state.layers[0];
+  const map=(x,y)=>G.tfMatrix(l).transformPoint({x,y});
+  const nw0=map(100,100),se0=map(300,250),target={x:se0.x+40,y:se0.y+30};
+  const q=G.tfMatrix(l).inverse().transformPoint(target),c0=G.centreOf(l);
+  l.g.w=q.x-100;l.g.h=q.y-100;
+  const d=G.pivotShift(l,c0);l.g.x+=d.dx;l.g.y+=d.dy;
+  near(map(l.g.x,l.g.y),nw0);near(map(l.g.x+l.g.w,l.g.y+l.g.h),target);
+  // path anchor: the other anchors do not slide, and the shift only applies to
+  // transformed layers
+  const p=createEditor({layers:[{kind:'path',pts:[{cmd:'move',x:400,y:100},{cmd:'line',x:550,y:100},{cmd:'line',x:475,y:225}],tf:{rot:30}}]},{matrix:true});
+  const PG=p.geometry,pl=p.state.layers[0];
+  const at=i=>PG.tfMatrix(pl).transformPoint({x:pl.pts[i].x,y:pl.pts[i].y});
+  const a0=at(0),a2=at(2),pc=PG.centreOf(pl);
+  p.api.pathEditing.setPoint(pl,{i:1,key:'a'},590,110);
+  const pd=PG.pivotShift(pl,pc);pl.pts.forEach(pt=>{pt.x+=pd.dx;pt.y+=pd.dy;});
+  near(at(0),a0);near(at(2),a2);
+  pl.tf.rot=0;assert.equal(PG.pivotShift(pl,PG.centreOf(pl)),null);
+});
+
 test('object snapping beats grid, excludes dragged shapes, and respects bypass', () => {
   const e=createEditor({layers:[{name:'target',kind:'rect'},{name:'moving',kind:'rect'}]});
   const S=e.state;S.view.z=2;S.grid=25;

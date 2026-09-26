@@ -61,8 +61,10 @@ introduce eval-based module loading. Preserve existing behavior during extractio
   inactive until a shape is selected. Save/import/history must preserve emptiness.
 - Generate default names with `nextName(kind)` so renames and imports cannot
   collide with the next numbered shape. Changing path tools continues the current
-  drawing; explicit Finish/New path controls its lifetime. Anchor hits precede
-  adding points; closing a path does not add a duplicate endpoint.
+  drawing; explicit Finish/New path controls its lifetime, and a lone path
+  selected while a segment tool is active is what the next click extends.
+  Anchor hits precede adding points; closing a path does not add a duplicate
+  endpoint. Undo and redo keep the current pan and zoom.
 - Record `push()` before a drawing mutation. Main supplies a full serializable
   project snapshot, so undo of an import also restores settings and image assets.
 - Pen points may have `smooth`, `outX`, and `outY` metadata. Move, scale, flip,

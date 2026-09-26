@@ -101,6 +101,17 @@ function tfMatrix(l){
   }catch(err){ return null; }
 }
 
+// The transform pivots on the bounds centre, so editing one point moves the pivot
+// and every untouched point slides across the sheet with it. Given the centre
+// from before the edit, this is the local shift that puts the old mapping back,
+// leaving only the edited point moved.
+function pivotShift(l,c0){
+  var m=tfMatrix(l); if(!m) return null;
+  var c1=centreOf(l), dx=c1.x-c0.x, dy=c1.y-c0.y;
+  if(!dx&&!dy) return null;
+  return {dx:m.a*dx+m.c*dy-dx, dy:m.b*dx+m.d*dy-dy};
+}
+
 function relMatrix(l,baseInv){
   var m=tfMatrix(l);
   try{
@@ -268,6 +279,7 @@ return {
   centreOf:centreOf,
   hasTf:hasTf,
   tfMatrix:tfMatrix,
+  pivotShift:pivotShift,
   relMatrix:relMatrix,
   isIdentity:isIdentity,
   gradEnds:gradEnds,

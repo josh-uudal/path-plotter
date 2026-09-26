@@ -13,7 +13,7 @@ var hitCv=document.createElement('canvas'), hitCtx=hitCv.getContext('2d');
 
 var model=window.PathPlotter.createModel(PALETTE), S=model.state;
 var workspace, bootReady=false, pathEdit=window.PathPlotter.pathEditing;
-var penDrag=null, penFresh=true, snapMark=null;
+var penDrag=null, penFresh=true, snapMark=null, lastPathTool='pen';
 var L=model.L,
     nextName=model.nextName,
     defaults=model.defaults,
@@ -40,6 +40,7 @@ var isCircularArc=geometry.isCircularArc,
     centreOf=geometry.centreOf,
     hasTf=geometry.hasTf,
     tfMatrix=geometry.tfMatrix,
+    pivotShift=geometry.pivotShift,
     relMatrix=geometry.relMatrix,
     isIdentity=geometry.isIdentity,
     gradEnds=geometry.gradEnds,
@@ -55,8 +56,13 @@ var isCircularArc=geometry.isCircularArc,
 
 var selection=window.PathPlotter.createSelection(S), normSel=selection.normalize,
     groupIdxs=selection.group, expandSel=selection.expand;
+// picking a lone path while a segment tool is in hand makes it the drawing
+// target: the next click extends it rather than starting another path
+function drawTarget(){
+  var l=L(); return isPathTool(S.tool)&&S.selLayers.length===1&&!!l&&l.kind==='path';
+}
 function setSel(idxs,active){
-  selection.set(idxs,active); penFresh=true;
+  selection.set(idxs,active); penFresh=!drawTarget();
 }
 function toggleSel(i){ selection.toggle(i); penFresh=true; }
 function deselect(){
@@ -92,11 +98,12 @@ function moveLayers(idxs,target){
 var history=window.PathPlotter.createHistory({
   state:S, normalize:normalize, toast:toast,
   getProject:function(){ return projectData(true); },
-  restoreProject:function(d){ applyProject(d); },
+  restoreProject:function(d){ applyProject(d,true); },
   onRestore:function(){
     document.getElementById('w').value=S.W;
     document.getElementById('h').value=S.H;
-    clearDrags(); penFresh=true; sync();
+    // undoing a point must not turn the next click into a new path
+    clearDrags(); penFresh=!drawTarget(); sync();
   }
 });
 var HIST=history.past, FUT=history.future;
@@ -106,7 +113,10 @@ var snapshot=history.snapshot,
     undo=function(){editActions.endNudge();history.undo();},
     redo=function(){editActions.endNudge();history.redo();};
 
-var editActions=window.PathPlotter.createEditActions({state:S,push:push,pathEditing:pathEdit,
+var editActions=window.PathPlotter.createEditActions({state:S,push:push,
+  // nudging a point of a transformed path has to hold the rest of it in place too
+  pathEditing:{position:pathEdit.position,
+    setPoint:function(l,s,x,y){ pinned(l,function(){ pathEdit.setPoint(l,s,x,y); }); }},
   shiftSelection:shiftSelection,changed:sync});
 var drawingSnap=window.PathPlotter.createDrawingSnap({state:S,grid:snapV,points:snapPointsFor,crossings:crossingsNear});
 function placement(x,y,excluded){
@@ -961,7 +971,7 @@ function insertAt(sx,sy){
   parts[1].smooth=old.smooth;
   if(old.outX!==undefined){parts[1].outX=old.outX;parts[1].outY=old.outY;}
   if(parts[0].cmd==='cubic')parts[0].smooth=true;
-  l.pts.splice(best.i,1,parts[0],parts[1]);
+  pinned(l,function(){ l.pts.splice(best.i,1,parts[0],parts[1]); });
   S.sel={i:best.i,key:'a'};
   sync(); return true;
 }
@@ -1601,7 +1611,9 @@ var javaIdent=java.javaIdent,
 
 function emitCode(){
   var el=document.getElementById('code'), txt=outputText();
-  document.getElementById('codeSelection').textContent=S.sel?'Highlighted: point '+(S.sel.i+1):
+  // S.sel also remembers a dragged corner or text handle, which is not a point
+  var cur=L(), point=S.sel&&cur&&cur.kind==='path'&&cur.pts[S.sel.i];
+  document.getElementById('codeSelection').textContent=point?'Highlighted: point '+(S.sel.i+1):
     S.selLayers.length?'Highlighted: '+S.selLayers.map(function(i){return S.layers[i].name;}).join(', '):'No shape selected';
   var blank=document.getElementById('blank'), empty=!txt.trim();
   // an empty sheet shows the title block instead of a lone comment line
@@ -1760,7 +1772,7 @@ function railAction(item){
   else if(item.id==='fit') fitView();
   else if(item.id==='grid'){ S.showGrid=!S.showGrid; document.getElementById('gridChk').checked=S.showGrid; syncRail(); draw(); scheduleSave(); }
   else if(item.id==='snap'){ S.snap=!S.snap; document.getElementById('snapChk').checked=S.snap; syncRail(); toast(S.snap?'Snap on':'Snap off'); scheduleSave(); }
-  else if(item.id==='sub'){ S.nextIsMove=true; if(S.tool==='select') setTool('pen');penFresh=false;
+  else if(item.id==='sub'){ S.nextIsMove=true; if(!isPathTool(S.tool)) setTool(drawTool()); penFresh=false;
                             toast('Next click starts a new subpath'); }
   else if(item.id==='undo') undo();
   else if(item.id==='redo') redo();
@@ -1773,6 +1785,7 @@ function setTool(t){
     if(!isPathTool(t)||!isPathTool(S.tool)) penFresh=true;
     penDrag=null; snapMark=null;
   }
+  if(isPathTool(t)) lastPathTool=t;
   editActions.endNudge();
   S.tool=t;
   if(t!=='select') S.sel=null;
@@ -1791,10 +1804,10 @@ function syncRail(){
     else if(item.type==='toggle')
       b.setAttribute('aria-pressed',String(item.id==='grid'?S.showGrid:S.snap));
   });
-  document.getElementById('rail_del').disabled=!S.sel;
+  var isPath=L()&&L().kind==='path';
+  document.getElementById('rail_del').disabled=!(S.sel&&isPath);
   document.getElementById('rail_undo').disabled=!HIST.length;
   document.getElementById('rail_redo').disabled=!FUT.length;
-  var isPath=L()&&L().kind==='path';
   document.getElementById('rail_sub').disabled=!isPath;
   if(workspace) workspace.update();
 }
@@ -2252,13 +2265,26 @@ function shiftLayer(l,dx,dy){
 function shiftSelection(dx,dy){
   S.selLayers.forEach(function(i){ if(S.layers[i]) shiftLayer(S.layers[i],dx,dy); });
 }
+// A point edit on a rotated, scaled, or sheared layer moves the transform pivot,
+// which would slide the rest of the layer across the sheet. Run the edit and
+// shift the layer back so the untouched geometry stays where it was drawn
+function pinned(l,edit){
+  var c0=hasTf(l)?centreOf(l):null;
+  edit();
+  var d=c0&&pivotShift(l,c0);
+  if(d) shiftLayer(l,d.dx,d.dy);
+}
 
 function isPathTool(t){ return ['pen','line','quad','cubic'].indexOf(t)>=0; }
+// Drawing resumes with the segment tool in hand, or the one last used when the
+// path was finished from the select tool: Continue must not silently switch a
+// line drawing over to the pen
+function drawTool(){ return isPathTool(S.tool)?S.tool:lastPathTool; }
 function newPath(){
   push();
   var l=normalize(defaults(nextName('path'),'path')); l.closed=false;
   S.layers.push(l); S.active=S.layers.length-1; S.selLayers=[S.active]; S.sel=null;
-  setTool('pen'); penFresh=false; showTab('shape'); sync();
+  setTool(drawTool()); penFresh=false; showTab('shape'); sync();
 }
 function finishPath(close){
   var l=L(); if(!l||l.kind!=='path'||!l.pts.length) return;
@@ -2269,7 +2295,7 @@ function finishPath(close){
 function continuePath(){
   var l=L(); if(!l||l.kind!=='path'||!l.pts.length) return;
   if(l.closed){push();l.closed=false;}
-  setTool('pen'); penFresh=false; S.sel=null; sync();
+  setTool(drawTool()); penFresh=false; S.sel=null; sync();
 }
 function ensurePath(){
   var l=L();
@@ -2283,17 +2309,21 @@ function addPoint(x,y){
   push();
   var l=ensurePath();
   l.closed=false;
-  if(!l.pts.length||S.nextIsMove){
-    l.pts.push({cmd:'move',x:x,y:y}); S.nextIsMove=false;
-  } else {
-    var prev=l.pts[l.pts.length-1];
-    if(S.tool==='quad') l.pts.push({cmd:'quad',x:x,y:y,
-      cx:Math.round((prev.x+x)/2),cy:Math.round((prev.y+y)/2)-60});
-    else if(S.tool==='cubic') l.pts.push({cmd:'cubic',x:x,y:y,
-      c1x:Math.round(prev.x+(x-prev.x)/3),c1y:Math.round(prev.y+(y-prev.y)/3)-50,
-      c2x:Math.round(prev.x+2*(x-prev.x)/3),c2y:Math.round(prev.y+2*(y-prev.y)/3)+50});
-    else l.pts.push({cmd:'line',x:x,y:y});
-  }
+  pinned(l,function(){
+    if(!l.pts.length||S.nextIsMove){
+      l.pts.push({cmd:'move',x:x,y:y}); S.nextIsMove=false;
+    } else {
+      var prev=l.pts[l.pts.length-1];
+      // the control starts on the chord, so the new segment stays where it was
+      // clicked until its control square is dragged
+      if(S.tool==='quad') l.pts.push({cmd:'quad',x:x,y:y,
+        cx:trim6((prev.x+x)/2),cy:trim6((prev.y+y)/2)});
+      else if(S.tool==='cubic') l.pts.push({cmd:'cubic',x:x,y:y,
+        c1x:Math.round(prev.x+(x-prev.x)/3),c1y:Math.round(prev.y+(y-prev.y)/3)-50,
+        c2x:Math.round(prev.x+2*(x-prev.x)/3),c2y:Math.round(prev.y+2*(y-prev.y)/3)+50});
+      else l.pts.push({cmd:'line',x:x,y:y});
+    }
+  });
   sync();
 }
 function deleteSelected(){
@@ -2302,11 +2332,13 @@ function deleteSelected(){
   if(!l||l.kind!=='path'||S.sel.key!=='a'){ toast('Only path points can be deleted'); return; }
   push();
   var i=S.sel.i,was=l.pts[i];
-  l.pts.splice(i,1);
-  if(was.cmd==='move'&&l.pts[i]&&l.pts[i].cmd!=='move')
-    l.pts[i]={cmd:'move',x:l.pts[i].x,y:l.pts[i].y};
-  if(l.pts.length&&l.pts[0].cmd!=='move')
-    l.pts[0]={cmd:'move',x:l.pts[0].x,y:l.pts[0].y};
+  pinned(l,function(){
+    l.pts.splice(i,1);
+    if(was.cmd==='move'&&l.pts[i]&&l.pts[i].cmd!=='move')
+      l.pts[i]={cmd:'move',x:l.pts[i].x,y:l.pts[i].y};
+    if(l.pts.length&&l.pts[0].cmd!=='move')
+      l.pts[0]={cmd:'move',x:l.pts[0].x,y:l.pts[0].y};
+  });
   S.sel=null; sync();
 }
 function deleteLayers(){
@@ -2404,9 +2436,9 @@ board.addEventListener('pointermove',function(e){
 
   if(S.tool==='measure'){ measMove(s); return; }
   if(penDrag){
-    var pl=L(),pp=pl.pts[penDrag.i],q=unTf(pl,s.x,s.y);
+    var pl=L(),q=unTf(pl,s.x,s.y);
     if(Math.hypot(s.x-penDrag.x,s.y-penDrag.y)*S.view.z>3){
-      pathEdit.pull(pl,penDrag.i,snapV(q.x),snapV(q.y));
+      pinned(pl,function(){ pathEdit.pull(pl,penDrag.i,snapV(q.x),snapV(q.y)); });
       S.sel={i:penDrag.i,key:'a'}; syncProps(); emitCode(); draw();
     }
     return;
@@ -2520,20 +2552,24 @@ board.addEventListener('pointermove',function(e){
       if(cur.g.extent<-360) cur.g.extent=-360;
       syncProps(); emitCode(); draw(); renderLayers(); return;
     }
-    var nx=q.x, ny=q.y;
-    if(cur.kind==='path'){
-      pathEdit.setPoint(cur,S.drag,nx,ny);
-    } else if(cur.kind==='text'){
-      cur.text.x=nx; cur.text.y=ny;
-    } else {
-      var g=norm(cur.g), x0=g.x,y0=g.y,x1=g.x+g.w,y1=g.y+g.h;
-      if(S.drag.key==='nw'){x0=nx;y0=ny;}
-      else if(S.drag.key==='ne'){x1=nx;y0=ny;}
-      else if(S.drag.key==='se'){x1=nx;y1=ny;}
-      else if(S.drag.key==='sw'){x0=nx;y1=ny;}
-      cur.g.x=Math.min(x0,x1); cur.g.y=Math.min(y0,y1);
-      cur.g.w=Math.abs(x1-x0); cur.g.h=Math.abs(y1-y0);
-    }
+    // a transformed layer lands on fractions once the pointer is mapped back;
+    // trim them so the inspector never shows raw float noise
+    var nx=trim6(q.x), ny=trim6(q.y);
+    pinned(cur,function(){
+      if(cur.kind==='path'){
+        pathEdit.setPoint(cur,S.drag,nx,ny);
+      } else if(cur.kind==='text'){
+        cur.text.x=nx; cur.text.y=ny;
+      } else {
+        var g=norm(cur.g), x0=g.x,y0=g.y,x1=g.x+g.w,y1=g.y+g.h;
+        if(S.drag.key==='nw'){x0=nx;y0=ny;}
+        else if(S.drag.key==='ne'){x1=nx;y0=ny;}
+        else if(S.drag.key==='se'){x1=nx;y1=ny;}
+        else if(S.drag.key==='sw'){x0=nx;y1=ny;}
+        cur.g.x=Math.min(x0,x1); cur.g.y=Math.min(y0,y1);
+        cur.g.w=Math.abs(x1-x0); cur.g.h=Math.abs(y1-y0);
+      }
+    });
     syncProps(); emitCode(); draw(); return;
   }
   var hp=['pen','line','quad','cubic'].indexOf(S.tool)>=0?placement(s.x,s.y,[]):{x:snapV(s.x),y:snapV(s.y)};
@@ -2613,8 +2649,9 @@ board.addEventListener('pointerdown',function(e){
   if(S.tool==='pen'){
     if(s.x<0||s.y<0||s.x>S.W||s.y>S.H) return;
     var pp=placement(s.x,s.y,[]); push();
-    var pl=ensurePath(), pq=unTf(pl,pp.x,pp.y);
-    var pi=pathEdit.append(pl,pq.x,pq.y,S.nextIsMove); S.nextIsMove=false;
+    var pl=ensurePath(), pq=unTf(pl,pp.x,pp.y), pi;
+    pinned(pl,function(){ pi=pathEdit.append(pl,pq.x,pq.y,S.nextIsMove); });
+    S.nextIsMove=false;
     penDrag={i:pi,x:pp.x,y:pp.y}; S.sel={i:pi,key:'a'}; sync(); return;
   }
   var rh=hitRot(s.x,s.y);
@@ -3065,7 +3102,7 @@ function setPointCoord(axis,v){
   var l=L(); if(!l||l.kind!=='path'||!S.sel) return;
   var p=l.pts[S.sel.i]; if(!p) return;
   var pt=pathEdit.position(l,S.sel); if(!pt) return;
-  pathEdit.setPoint(l,S.sel,axis==='x'?v:pt.x,axis==='y'?v:pt.y);
+  pinned(l,function(){ pathEdit.setPoint(l,S.sel,axis==='x'?v:pt.x,axis==='y'?v:pt.y); });
   emitCode(); draw(); renderLayers();
 }
 document.getElementById('ptx').addEventListener('input',function(){
@@ -3567,9 +3604,10 @@ document.getElementById('saveProj').onclick=function(){
 };
 document.getElementById('openProj').onclick=function(){ document.getElementById('projFile').click(); };
 // shared by "Open .json" and by restoring the last session after a refresh
-function applyProject(d){
+function applyProject(d,keepView){
   d=window.PathPlotter.validateProject(d);
   sessionTrimmed=!!d.trimmed;
+  var sheet={w:S.W,h:S.H};
   clearDrags(); S.sel=null; penFresh=true;
   S.img=null;pendingTrace=null; imageLoadRevision++;
   document.getElementById('imgControls').style.display='none';
@@ -3631,7 +3669,10 @@ function applyProject(d){
   if(d.className) document.getElementById('className').value=d.className;
   if(d.image&&d.image.src) loadImageSrc(d.image.src,d.image);
   sync();
-  // always fit: a stored pan/zoom is worth little and can strand the sheet off-screen
+  // undo and redo stay in the pan and zoom being worked in; opening a file
+  // fits, since a stored view is worth little and can strand the sheet off-screen.
+  // A sheet that changed size refits either way so it cannot land off-screen
+  if(keepView&&S.W===sheet.w&&S.H===sheet.h) return;
   fitView();
 }
 document.getElementById('projFile').addEventListener('change',function(e){
@@ -3991,12 +4032,23 @@ document.getElementById('editOnCanvas').onclick=function(){
 
 /* ================= keyboard ================= */
 
+// A bare Alt press is a browser shortcut on Windows: Chrome and Edge move focus
+// to their toolbar on release and Firefox opens its menu bar, which blurs the
+// page and cancels whatever was being dragged. Claim it while it is the fine key
+function claimFineKey(e){
+  if(e.key!=='Alt'||S.fineKey!=='alt') return;
+  var ae=document.activeElement;
+  if(ae&&(/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)||ae.isContentEditable)) return;
+  e.preventDefault();
+}
 // the fine key has to be live even when the pointer is still
 document.addEventListener('keydown',function(e){
+  claimFineKey(e);
   if(fineOn(e)&&!S.fine){ S.fine=true; fineStatus(true); }
   setScaleMod(e.ctrlKey||e.metaKey);
 });
 document.addEventListener('keyup',function(e){
+  claimFineKey(e);
   if(e.key.indexOf('Arrow')===0) editActions.endNudge();
   if(S.fine&&!fineOn(e)){ S.fine=false; fineStatus(false); }
   setScaleMod(e.ctrlKey||e.metaKey);
@@ -4041,6 +4093,7 @@ document.addEventListener('keydown',function(e){
     setSel(all,S.active); S.sel=null; sync(); return;
   }
   if(e.ctrlKey||e.metaKey) return;
+  if(e.altKey&&k.length===1) return;   // Alt+letter is the browser's; Alt alone is the fine key
   if(/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;   // no tool switching from a control
   if(e.key==='?'){ document.getElementById('help').classList.toggle('on'); return; }
   if(k==='escape'){ document.getElementById('help').classList.remove('on'); return; }
@@ -4060,16 +4113,19 @@ document.addEventListener('keydown',function(e){
   else if(k==='g'){ S.showGrid=!S.showGrid; document.getElementById('gridChk').checked=S.showGrid; syncRail(); draw(); scheduleSave(); }
   else if(k==='s'){ S.snap=!S.snap; document.getElementById('snapChk').checked=S.snap; syncRail(); toast(S.snap?'Snap on':'Snap off'); scheduleSave(); }
   else if(k==='d'){ S.solidView=!S.solidView; document.getElementById('solidChk').checked=S.solidView; draw(); scheduleSave(); workspace.update();toast(S.solidView?'True opacity: all shapes solid':'Dimming unselected shapes'); }
-  else if(k==='m'){ S.nextIsMove=true; if(S.tool==='select') setTool('pen');penFresh=false; toast('Next click starts a new subpath'); }
+  else if(k==='m'){ S.nextIsMove=true; if(!isPathTool(S.tool)) setTool(drawTool()); penFresh=false; toast('Next click starts a new subpath'); }
   else if(k==='l') setTool('measure');
   else if(k==='p') showPreview();
   else if(k==='b') showSetLab();
   else if(k==='n') document.getElementById('addLayer').click();
-  else if(k==='u'){ var l0=L(); if(l0&&l0.kind==='path'&&l0.pts.length){ push(); l0.pts.pop(); S.sel=null; sync(); } }
+  else if(k==='u'){ var l0=L(); if(l0&&l0.kind==='path'&&l0.pts.length){ push(); pinned(l0,function(){ l0.pts.pop(); }); S.sel=null; sync(); } }
   else if(k==='delete'||k==='backspace'){
     e.preventDefault();
+    // a dragged corner or text handle also sits in S.sel, but only a path
+    // point selection changes what Delete means
+    var dl=L();
     if(S.tool==='measure'&&S.measSel>=0) measDelete(S.measSel);
-    else if(S.sel) deleteSelected(); else deleteLayers();
+    else if(S.sel&&dl&&dl.kind==='path') deleteSelected(); else deleteLayers();
   }
   else if(k==='0') fitView();
   else if(k==='='||k==='+') zoomCentre(S.view.z*1.25);
@@ -5518,6 +5574,7 @@ else window.addEventListener('resize',resize);
 
 workspace=window.PathPlotter.createWorkspace({state:S,push:push,sync:sync,save:scheduleSave,
   preview:showPreview,toast:toast,tab:showTab,newPath:newPath,finish:finishPath,continuePath:continuePath,
+  pinned:pinned,
   selectCode:function(i,point){
     setSel([i],i); S.sel=point===null?null:{i:point,key:'a'}; setTool('select'); sync();
   }

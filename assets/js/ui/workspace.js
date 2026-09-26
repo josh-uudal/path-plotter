@@ -16,10 +16,11 @@ root.createWorkspace=function(deps){
     on(id,function(){
       if(!S.sel) return;
       var l=S.layers[S.active];
-      action(function(){
+      // handles change with the node type, so a transformed path is pinned too
+      action(function(){ deps.pinned(l,function(){
         if(id==='smoothNode'||id==='cornerNode') root.pathEditing.nodeMode(l,S.sel.i,id==='smoothNode');
         else root.pathEditing.segment(l,S.sel.i,id==='curveSegment'?'cubic':'line');
-      });
+      }); });
     });
   });
   el('quickSnap').onchange=function(){ S.snap=this.checked; el('snapChk').checked=S.snap; deps.sync(); };

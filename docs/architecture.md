@@ -23,8 +23,9 @@ not query controls or render HTML. Syntax formatting is a separate UI concern.
 
 ## What remains in main.js
 
-This setup extracts the reusable foundations. The remaining editor orchestration
-has not been mechanically split into a chain of shared globals. It still owns:
+The modules above hold the reusable foundations. The remaining editor
+orchestration stays in main.js rather than being split into a chain of shared
+globals. It owns:
 
 - Canvas rendering, view transforms, hit testing, and pointer/keyboard events.
 - Image caching, fonts, boolean-preview computation, and selection transformations.
@@ -57,9 +58,10 @@ The property inspector is inactive until a shape is selected. History and projec
 recovery preserve this state. Default numbered names scan current layer names,
 including renamed and imported shapes.
 
-Path-tool changes preserve an ongoing path. Handle hits are checked before point
+Path-tool changes preserve an ongoing path, and selecting a single path while a
+segment tool is active makes it the drawing target. Handle hits are checked before point
 creation; the current run's starting anchor closes it without another endpoint.
-Finish exits drawing, Continue resumes the selected path, and Escape deselects.
+Finish exits drawing, Continue resumes the selected path with the segment tool in use (or the one last used), and Escape deselects.
 
 The current `sync()` refreshes most UI and schedules a local save. Live drags often
 use smaller update sequences for immediate feedback. History must be recorded
@@ -70,17 +72,18 @@ The project schema is version 9. Validation runs before changing live state. Old
 
 ## Regression strategy
 
-Export fixtures were captured from the pre-reorganization generator, so the
-extraction can be checked against existing output. The fixture suite covers
-representative paths, primitives, text, clips, booleans, gradients, and output
-modes. It is not a claim that every original export is correct. The UX
-revision intentionally updates fractional text baseline output and image asset guidance. Compilation regressions cover fractional font, text, and image values in both generation modes.
+`tests/fixtures/java-output.json` records generator output for representative
+paths, primitives, text, clips, booleans, gradients, and output modes, so
+refactors can be checked against known output. A matching fixture shows that
+output is unchanged, not that it is correct. When a fix intentionally changes
+output, update the affected fixtures in the same change. Compilation tests cover
+fractional font, text, and image values in both generation modes.
 
 The syntax/static-reference check and browser smoke tests cover loading order and
 asset relocation. Preserve CSS concatenation order when moving styles between
 files; a refactor should not silently become a visual redesign.
 
-## UX module boundaries
+## Editing and output module boundaries
 
 Path editing is DOM independent and works on the existing segment model. Outgoing
 pen handles are node metadata, so Continue can reuse a tangent after a reload.
